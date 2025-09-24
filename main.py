@@ -2,36 +2,50 @@
 Main training pipeline for World Model agent.
 """
 
-import os
 import argparse
-import torch
+import os
+
 import numpy as np
+import torch
 
 from world_models import (
-    WorldModelAgentConfig,
     FSQVAE,
-    WorldModel,
+    ControllerTrainer,
     DataCollector,
     ImageDataset,
     SequenceDataset,
     VAETrainer,
+    WorldModel,
+    WorldModelAgentConfig,
     WorldModelTrainer,
-    ControllerTrainer,
 )
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Train World Model Agent')
-    parser.add_argument('--config', type=str, default=None,
-                       help='Path to config file')
-    parser.add_argument('--stage', type=str, choices=['collect', 'vae', 'world_model', 'controller', 'all'],
-                       default='all', help='Training stage to run')
-    parser.add_argument('--data_file', type=str, default='training_data.h5',
-                       help='Data file name')
-    parser.add_argument('--resume', action='store_true',
-                       help='Resume training from checkpoint')
-    parser.add_argument('--device', type=str, default='auto',
-                       help='Device to use (cpu/cuda/auto)')
+    parser = argparse.ArgumentParser(description="Train World Model Agent")
+    parser.add_argument("--config", type=str, default=None, help="Path to config file")
+    parser.add_argument(
+        "--stage",
+        type=str,
+        choices=["collect", "vae", "world_model", "controller", "all"],
+        default="all",
+        help="Training stage to run",
+    )
+    parser.add_argument(
+        "--data_file", type=str, default="training_data.h5", help="Data file name"
+    )
+    parser.add_argument(
+        "--resume", action="store_true", help="Resume training from checkpoint"
+    )
+    parser.add_argument(
+        "--device", type=str, default="auto", help="Device to use (cpu/cuda/auto)"
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=-1,
+        help="Number of parallel workers for data collection (-1 for auto)",
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -42,11 +56,14 @@ def main():
         config = WorldModelAgentConfig()
 
     # Set device
-    if args.device == 'auto':
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    if args.device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     else:
         device = args.device
     config.training.device = device
+
+    # Set parallel workers
+    config.data.num_workers = args.workers
 
     # Validate configuration
     config.validate_consistency()
@@ -55,33 +72,32 @@ def main():
     os.makedirs(config.data.data_dir, exist_ok=True)
     os.makedirs(config.training.checkpoint_dir, exist_ok=True)
 
-
     print(f"Starting World Model training pipeline...")
     print(f"Device: {device}")
     print(f"Stage: {args.stage}")
 
-    if args.stage in ['collect', 'all']:
-        print("\n" + "="*50)
+    if args.stage in ["collect", "all"]:
+        print("\n" + "=" * 50)
         print("STAGE 1: DATA COLLECTION")
-        print("="*50)
+        print("=" * 50)
         collect_data(config, args.data_file)
 
-    if args.stage in ['vae', 'all']:
-        print("\n" + "="*50)
+    if args.stage in ["vae", "all"]:
+        print("\n" + "=" * 50)
         print("STAGE 2: VAE TRAINING")
-        print("="*50)
+        print("=" * 50)
         train_vae(config, args.data_file, args.resume)
 
-    if args.stage in ['world_model', 'all']:
-        print("\n" + "="*50)
+    if args.stage in ["world_model", "all"]:
+        print("\n" + "=" * 50)
         print("STAGE 3: WORLD MODEL TRAINING")
-        print("="*50)
+        print("=" * 50)
         train_world_model(config, args.data_file, args.resume)
 
-    if args.stage in ['controller', 'all']:
-        print("\n" + "="*50)
+    if args.stage in ["controller", "all"]:
+        print("\n" + "=" * 50)
         print("STAGE 4: CONTROLLER TRAINING")
-        print("="*50)
+        print("=" * 50)
         train_controller(config, args.resume)
 
     print("\nTraining pipeline completed!")
@@ -119,7 +135,7 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     trainer = VAETrainer(vae, config)
 
     # Resume from checkpoint if requested
-    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, 'vae_latest.pth')
+    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
     if resume and os.path.exists(vae_checkpoint_path):
         print(f"Resuming VAE training from {vae_checkpoint_path}")
         trainer.load_checkpoint(vae_checkpoint_path)
@@ -136,7 +152,9 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     return vae
 
 
-def train_world_model(config: WorldModelAgentConfig, data_file: str, resume: bool = False):
+def train_world_model(
+    config: WorldModelAgentConfig, data_file: str, resume: bool = False
+):
     """Train the world model."""
     # Load data
     collector = DataCollector(config.data)
@@ -145,7 +163,7 @@ def train_world_model(config: WorldModelAgentConfig, data_file: str, resume: boo
 
     # Load trained VAE
     vae = FSQVAE(config.fsq_vae)
-    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, 'vae_latest.pth')
+    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
     if os.path.exists(vae_checkpoint_path):
         vae_trainer = VAETrainer(vae, config)
         vae_trainer.load_checkpoint(vae_checkpoint_path)
@@ -158,13 +176,17 @@ def train_world_model(config: WorldModelAgentConfig, data_file: str, resume: boo
     trainer = WorldModelTrainer(world_model, vae, config)
 
     # Resume from checkpoint if requested
-    wm_checkpoint_path = os.path.join(config.training.checkpoint_dir, 'world_model_latest.pth')
+    wm_checkpoint_path = os.path.join(
+        config.training.checkpoint_dir, "world_model_latest.pth"
+    )
     if resume and os.path.exists(wm_checkpoint_path):
         print(f"Resuming world model training from {wm_checkpoint_path}")
         trainer.load_checkpoint(wm_checkpoint_path)
 
     # Train
-    print(f"Training world model for {config.training.train_world_model_epochs} epochs...")
+    print(
+        f"Training world model for {config.training.train_world_model_epochs} epochs..."
+    )
     history = trainer.train(dataset, config.training.train_world_model_epochs)
 
     # Save checkpoint
@@ -181,8 +203,10 @@ def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     vae = FSQVAE(config.fsq_vae)
     world_model = WorldModel(config.world_model)
 
-    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, 'vae_latest.pth')
-    wm_checkpoint_path = os.path.join(config.training.checkpoint_dir, 'world_model_latest.pth')
+    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
+    wm_checkpoint_path = os.path.join(
+        config.training.checkpoint_dir, "world_model_latest.pth"
+    )
 
     if os.path.exists(vae_checkpoint_path):
         vae_trainer = VAETrainer(vae, config)
@@ -202,19 +226,25 @@ def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     trainer = ControllerTrainer(vae, world_model, config)
 
     # Resume from checkpoint if requested
-    controller_checkpoint_path = os.path.join(config.training.checkpoint_dir, 'controller_latest.pth')
+    controller_checkpoint_path = os.path.join(
+        config.training.checkpoint_dir, "controller_latest.pth"
+    )
     if resume and os.path.exists(controller_checkpoint_path):
         print(f"Resuming controller training from {controller_checkpoint_path}")
         # TODO: Implement controller resume logic
 
     # Train
-    print(f"Training controller for {config.training.train_controller_epochs} generations...")
+    print(
+        f"Training controller for {config.training.train_controller_epochs} generations..."
+    )
     history = trainer.train(config.training.train_controller_epochs)
 
     # Save best controller
     best_controller = trainer.get_best_controller()
-    torch.save(best_controller.state_dict(),
-              os.path.join(config.training.checkpoint_dir, 'best_controller.pth'))
+    torch.save(
+        best_controller.state_dict(),
+        os.path.join(config.training.checkpoint_dir, "best_controller.pth"),
+    )
 
     # Save population checkpoint
     print(f"Saving controller checkpoint to {controller_checkpoint_path}")
@@ -227,6 +257,7 @@ def train_controller(config: WorldModelAgentConfig, resume: bool = False):
 def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
     """Evaluate the trained agent in the real environment."""
     import gymnasium as gym
+
     from world_models import EvolutionaryController
 
     # Load trained models
@@ -234,8 +265,10 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
     controller = EvolutionaryController(config.controller)
 
     # Load checkpoints
-    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, 'vae_latest.pth')
-    controller_checkpoint_path = os.path.join(config.training.checkpoint_dir, 'best_controller.pth')
+    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
+    controller_checkpoint_path = os.path.join(
+        config.training.checkpoint_dir, "best_controller.pth"
+    )
 
     if os.path.exists(vae_checkpoint_path):
         vae_trainer = VAETrainer(vae, config)
@@ -253,9 +286,11 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
         return
 
     # Create environment
-    env = gym.make(config.data.env_name, render_mode='human')
+    env = gym.make(config.data.env_name, render_mode="human")
 
-    device = torch.device(config.training.device if torch.cuda.is_available() else 'cpu')
+    device = torch.device(
+        config.training.device if torch.cuda.is_available() else "cpu"
+    )
     vae.to(device).eval()
     controller.to(device).eval()
 
@@ -267,7 +302,12 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
 
         for step in range(config.data.max_episode_length):
             # Preprocess observation
-            obs_tensor = torch.from_numpy(obs.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+            obs_tensor = (
+                torch.from_numpy(obs.astype(np.float32) / 255.0)
+                .permute(2, 0, 1)
+                .unsqueeze(0)
+                .to(device)
+            )
 
             # Encode to state representation
             with torch.no_grad():

@@ -3,14 +3,15 @@
 Test script to verify all World Model components work correctly.
 """
 
-import torch
 import numpy as np
+import torch
+
 from world_models import (
-    WorldModelAgentConfig,
     FSQVAE,
-    WorldModel,
     Controller,
     EvolutionaryController,
+    WorldModel,
+    WorldModelAgentConfig,
 )
 
 
@@ -65,7 +66,9 @@ def test_world_model():
 
     with torch.no_grad():
         # Test forward pass
-        next_state_logits, pred_rewards, pred_dones, hidden = model(state_indices, actions)
+        next_state_logits, pred_rewards, pred_dones, hidden = model(
+            state_indices, actions
+        )
 
         # Test loss computation
         loss, loss_dict = model.compute_loss(
@@ -108,9 +111,15 @@ def test_controller():
     print(f"  ✓ Standard controller input shape: {state.shape}")
     print(f"  ✓ Standard controller output shape: {actions.shape}")
     print(f"  ✓ Single action shape: {single_action.shape}")
-    print(f"  ✓ Action ranges - Steering: [{actions[:, 0].min():.3f}, {actions[:, 0].max():.3f}]")
-    print(f"  ✓ Action ranges - Gas: [{actions[:, 1].min():.3f}, {actions[:, 1].max():.3f}]")
-    print(f"  ✓ Action ranges - Brake: [{actions[:, 2].min():.3f}, {actions[:, 2].max():.3f}]")
+    print(
+        f"  ✓ Action ranges - Steering: [{actions[:, 0].min():.3f}, {actions[:, 0].max():.3f}]"
+    )
+    print(
+        f"  ✓ Action ranges - Gas: [{actions[:, 1].min():.3f}, {actions[:, 1].max():.3f}]"
+    )
+    print(
+        f"  ✓ Action ranges - Brake: [{actions[:, 2].min():.3f}, {actions[:, 2].max():.3f}]"
+    )
 
     # Test evolutionary controller
     evo_controller = EvolutionaryController(config.controller)
@@ -167,7 +176,10 @@ def test_integration():
 
         # Convert back to FSQ representation
         from world_models.models.world_model import indices_to_fsq
-        next_z_q = indices_to_fsq(next_state_indices.squeeze(-1), config.fsq_vae.fsq_levels)
+
+        next_z_q = indices_to_fsq(
+            next_state_indices.squeeze(-1), config.fsq_vae.fsq_levels
+        )
 
         # Decode next state
         next_obs = vae.decode(next_z_q)
@@ -205,6 +217,7 @@ def main():
     except Exception as e:
         print(f"\n❌ TEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

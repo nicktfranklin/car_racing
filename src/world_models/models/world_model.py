@@ -2,11 +2,12 @@
 LSTM-based world model with softmax over state tokens.
 """
 
+from typing import Optional, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Optional
-import numpy as np
 
 from ..config import WorldModelConfig
 
@@ -26,15 +27,11 @@ class WorldModel(nn.Module):
 
         # Input embedding: combine current state indices and action
         self.state_embedding = nn.Embedding(
-            num_embeddings=self.num_state_tokens,
-            embedding_dim=config.hidden_size // 2
+            num_embeddings=self.num_state_tokens, embedding_dim=config.hidden_size // 2
         )
 
         # Action projection
-        self.action_projection = nn.Linear(
-            config.action_dim,
-            config.hidden_size // 2
-        )
+        self.action_projection = nn.Linear(config.action_dim, config.hidden_size // 2)
 
         # LSTM core
         self.lstm = nn.LSTM(
@@ -42,7 +39,7 @@ class WorldModel(nn.Module):
             hidden_size=config.hidden_size,
             num_layers=config.num_layers,
             dropout=config.dropout if config.num_layers > 1 else 0,
-            batch_first=True
+            batch_first=True,
         )
 
         # Output heads for predicting next state tokens
@@ -54,9 +51,14 @@ class WorldModel(nn.Module):
         # Done prediction head
         self.done_head = nn.Linear(config.hidden_size, 1)
 
-    def forward(self, state_indices: torch.Tensor, actions: torch.Tensor,
-                hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(
+        self,
+        state_indices: torch.Tensor,
+        actions: torch.Tensor,
+        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]
+    ]:
         """
         Forward pass through the world model.
 
@@ -74,16 +76,22 @@ class WorldModel(nn.Module):
         batch_size, seq_len = state_indices.shape
 
         # Embed state indices
-        state_emb = self.state_embedding(state_indices)  # (batch, seq_len, hidden_size//2)
+        state_emb = self.state_embedding(
+            state_indices
+        )  # (batch, seq_len, hidden_size//2)
 
         # Project actions
         action_emb = self.action_projection(actions)  # (batch, seq_len, hidden_size//2)
 
         # Combine state and action embeddings
-        lstm_input = torch.cat([state_emb, action_emb], dim=-1)  # (batch, seq_len, hidden_size)
+        lstm_input = torch.cat(
+            [state_emb, action_emb], dim=-1
+        )  # (batch, seq_len, hidden_size)
 
         # LSTM forward pass
-        lstm_output, hidden = self.lstm(lstm_input, hidden)  # (batch, seq_len, hidden_size)
+        lstm_output, hidden = self.lstm(
+            lstm_input, hidden
+        )  # (batch, seq_len, hidden_size)
 
         # Predict next state tokens
         next_state_logits = self.state_head(lstm_output)  # (batch, seq_len, num_tokens)
@@ -94,10 +102,15 @@ class WorldModel(nn.Module):
 
         return next_state_logits, rewards, dones, hidden
 
-    def sample_next_state(self, state_indices: torch.Tensor, actions: torch.Tensor,
-                         hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-                         temperature: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor,
-                                                           Tuple[torch.Tensor, torch.Tensor]]:
+    def sample_next_state(
+        self,
+        state_indices: torch.Tensor,
+        actions: torch.Tensor,
+        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        temperature: float = 1.0,
+    ) -> Tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]
+    ]:
         """
         Sample next state from the model distribution.
 
@@ -114,7 +127,9 @@ class WorldModel(nn.Module):
             hidden: Updated hidden state
         """
         with torch.no_grad():
-            next_state_logits, rewards, dones, hidden = self.forward(state_indices, actions, hidden)
+            next_state_logits, rewards, dones, hidden = self.forward(
+                state_indices, actions, hidden
+            )
 
             # Sample from categorical distribution
             if temperature > 0:
@@ -126,9 +141,14 @@ class WorldModel(nn.Module):
 
             return next_state_indices, rewards, dones, hidden
 
-    def compute_loss(self, state_indices: torch.Tensor, actions: torch.Tensor,
-                    next_state_indices: torch.Tensor, rewards: torch.Tensor,
-                    dones: torch.Tensor) -> Tuple[torch.Tensor, dict]:
+    def compute_loss(
+        self,
+        state_indices: torch.Tensor,
+        actions: torch.Tensor,
+        next_state_indices: torch.Tensor,
+        rewards: torch.Tensor,
+        dones: torch.Tensor,
+    ) -> Tuple[torch.Tensor, dict]:
         """
         Compute world model training loss.
 
@@ -144,54 +164,54 @@ class WorldModel(nn.Module):
             loss_dict: Dictionary of individual losses
         """
         # Forward pass
-        next_state_logits, pred_rewards, pred_dones, _ = self.forward(state_indices, actions)
+        next_state_logits, pred_rewards, pred_dones, _ = self.forward(
+            state_indices, actions
+        )
 
         # State prediction loss (cross-entropy)
         state_loss = F.cross_entropy(
             next_state_logits.reshape(-1, self.num_state_tokens),
             next_state_indices.reshape(-1),
-            reduction='mean'
+            reduction="mean",
         )
 
         # Reward prediction loss (MSE)
-        reward_loss = F.mse_loss(
-            pred_rewards.squeeze(-1),
-            rewards,
-            reduction='mean'
-        )
+        reward_loss = F.mse_loss(pred_rewards.squeeze(-1), rewards, reduction="mean")
 
         # Done prediction loss (binary cross-entropy)
         done_loss = F.binary_cross_entropy_with_logits(
-            pred_dones.squeeze(-1),
-            dones.float(),
-            reduction='mean'
+            pred_dones.squeeze(-1), dones.float(), reduction="mean"
         )
 
         # Combined loss
         total_loss = state_loss + reward_loss + done_loss
 
         loss_dict = {
-            'total_loss': total_loss.item(),
-            'state_loss': state_loss.item(),
-            'reward_loss': reward_loss.item(),
-            'done_loss': done_loss.item(),
+            "total_loss": total_loss.item(),
+            "state_loss": state_loss.item(),
+            "reward_loss": reward_loss.item(),
+            "done_loss": done_loss.item(),
         }
 
         # Calculate accuracy for state prediction
         with torch.no_grad():
             state_preds = torch.argmax(next_state_logits, dim=-1)
             state_accuracy = (state_preds == next_state_indices).float().mean()
-            loss_dict['state_accuracy'] = state_accuracy.item()
+            loss_dict["state_accuracy"] = state_accuracy.item()
 
         return total_loss, loss_dict
 
-    def init_hidden(self, batch_size: int, device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
+    def init_hidden(
+        self, batch_size: int, device: torch.device
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Initialize hidden state."""
         h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size, device=device)
         c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size, device=device)
         return h0, c0
 
-    def detach_hidden(self, hidden: Tuple[torch.Tensor, torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def detach_hidden(
+        self, hidden: Tuple[torch.Tensor, torch.Tensor]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Detach hidden state from computation graph."""
         h, c = hidden
         return h.detach(), c.detach()
@@ -261,8 +281,12 @@ if __name__ == "__main__":
 
     # Test forward pass
     with torch.no_grad():
-        next_state_logits, pred_rewards, pred_dones, hidden = model(state_indices, actions)
-        loss, loss_dict = model.compute_loss(state_indices, actions, next_state_indices, rewards, dones)
+        next_state_logits, pred_rewards, pred_dones, hidden = model(
+            state_indices, actions
+        )
+        loss, loss_dict = model.compute_loss(
+            state_indices, actions, next_state_indices, rewards, dones
+        )
 
     print(f"Input state indices shape: {state_indices.shape}")
     print(f"Input actions shape: {actions.shape}")

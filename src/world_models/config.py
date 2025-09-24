@@ -2,13 +2,15 @@
 Configuration models for World Model agent with FSQ-VAE and LSTM.
 """
 
-from typing import List, Tuple, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional, Tuple
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FSQVAEConfig(BaseModel):
     """Configuration for Finite Scalar Quantization VAE."""
-    model_config = ConfigDict(extra='forbid')
+
+    model_config = ConfigDict(extra="forbid")
 
     # Image dimensions
     input_channels: int = Field(default=3, description="Number of input channels")
@@ -17,32 +19,27 @@ class FSQVAEConfig(BaseModel):
 
     # Encoder architecture
     encoder_channels: List[int] = Field(
-        default=[32, 64, 128, 256],
-        description="Channel sizes for encoder layers"
+        default=[32, 64, 128, 256], description="Channel sizes for encoder layers"
     )
     encoder_strides: List[int] = Field(
-        default=[2, 2, 2, 2],
-        description="Stride for each encoder layer"
+        default=[2, 2, 2, 2], description="Stride for each encoder layer"
     )
 
     # FSQ quantization parameters
     fsq_levels: List[int] = Field(
         default=[8, 5, 5, 5],
-        description="Quantization levels for each dimension (e.g., [8,5,5,5] = 1000 codes)"
+        description="Quantization levels for each dimension (e.g., [8,5,5,5] = 1000 codes)",
     )
     latent_dim: int = Field(
-        default=32,
-        description="Latent dimension before FSQ quantization"
+        default=32, description="Latent dimension before FSQ quantization"
     )
 
     # Decoder architecture
     decoder_channels: List[int] = Field(
-        default=[256, 128, 64, 32],
-        description="Channel sizes for decoder layers"
+        default=[256, 128, 64, 32], description="Channel sizes for decoder layers"
     )
     decoder_strides: List[int] = Field(
-        default=[2, 2, 2, 2],
-        description="Stride for each decoder layer"
+        default=[2, 2, 2, 2], description="Stride for each decoder layer"
     )
 
     # Training parameters
@@ -52,7 +49,8 @@ class FSQVAEConfig(BaseModel):
 
 class WorldModelConfig(BaseModel):
     """Configuration for LSTM-based world model."""
-    model_config = ConfigDict(extra='forbid')
+
+    model_config = ConfigDict(extra="forbid")
 
     # Architecture
     hidden_size: int = Field(default=256, description="LSTM hidden size")
@@ -60,13 +58,14 @@ class WorldModelConfig(BaseModel):
     dropout: float = Field(default=0.0, description="Dropout rate")
 
     # Input/Output dimensions
-    state_dim: int = Field(default=4, description="State representation dimension (FSQ dimensions)")
+    state_dim: int = Field(
+        default=4, description="State representation dimension (FSQ dimensions)"
+    )
     action_dim: int = Field(default=3, description="Action dimension")
 
     # FSQ parameters (must match FSQVAEConfig)
     fsq_levels: List[int] = Field(
-        default=[8, 5, 5, 5],
-        description="FSQ levels for state prediction"
+        default=[8, 5, 5, 5], description="FSQ levels for state prediction"
     )
 
     # Training parameters
@@ -76,17 +75,19 @@ class WorldModelConfig(BaseModel):
 
 class ControllerConfig(BaseModel):
     """Configuration for the controller network."""
-    model_config = ConfigDict(extra='forbid')
+
+    model_config = ConfigDict(extra="forbid")
 
     # Architecture
     hidden_sizes: List[int] = Field(
-        default=[256, 256],
-        description="Hidden layer sizes"
+        default=[256, 256], description="Hidden layer sizes"
     )
     activation: str = Field(default="tanh", description="Activation function")
 
     # Input/Output dimensions
-    state_dim: int = Field(default=4, description="State representation dimension (FSQ dimensions)")
+    state_dim: int = Field(
+        default=4, description="State representation dimension (FSQ dimensions)"
+    )
     action_dim: int = Field(default=3, description="Action dimension")
 
     # Training parameters
@@ -95,15 +96,26 @@ class ControllerConfig(BaseModel):
 
 class DataConfig(BaseModel):
     """Configuration for data collection and processing."""
-    model_config = ConfigDict(extra='forbid')
+
+    model_config = ConfigDict(extra="forbid")
 
     # Environment
-    env_name: str = Field(default="CarRacing-v3", description="Gymnasium environment name")
+    env_name: str = Field(
+        default="CarRacing-v3", description="Gymnasium environment name"
+    )
     render_mode: str = Field(default="rgb_array", description="Rendering mode")
 
     # Data collection
-    num_rollouts: int = Field(default=10000, description="Number of rollouts to collect")
+    num_rollouts: int = Field(
+        default=10000, description="Number of rollouts to collect"
+    )
     max_episode_length: int = Field(default=1000, description="Maximum episode length")
+
+    # Parallel collection
+    num_workers: int = Field(
+        default=-1, description="Number of parallel workers (-1 for auto)"
+    )
+    batch_size: int = Field(default=100, description="Episodes per worker batch")
 
     # Data processing
     frame_skip: int = Field(default=4, description="Frame skip for data collection")
@@ -115,7 +127,8 @@ class DataConfig(BaseModel):
 
 class TrainingConfig(BaseModel):
     """Configuration for training pipeline."""
-    model_config = ConfigDict(extra='forbid')
+
+    model_config = ConfigDict(extra="forbid")
 
     # General training
     device: str = Field(default="cuda", description="Training device")
@@ -124,8 +137,12 @@ class TrainingConfig(BaseModel):
 
     # Stage-wise training
     train_vae_epochs: int = Field(default=50, description="VAE training epochs")
-    train_world_model_epochs: int = Field(default=50, description="World model training epochs")
-    train_controller_epochs: int = Field(default=100, description="Controller training epochs")
+    train_world_model_epochs: int = Field(
+        default=50, description="World model training epochs"
+    )
+    train_controller_epochs: int = Field(
+        default=100, description="Controller training epochs"
+    )
 
     # Evaluation
     eval_every: int = Field(default=10, description="Evaluate every N epochs")
@@ -135,12 +152,15 @@ class TrainingConfig(BaseModel):
     log_every: int = Field(default=100, description="Log every N steps")
 
     # Paths
-    checkpoint_dir: str = Field(default="./checkpoints", description="Checkpoint directory")
+    checkpoint_dir: str = Field(
+        default="./checkpoints", description="Checkpoint directory"
+    )
 
 
 class WorldModelAgentConfig(BaseModel):
     """Main configuration combining all components."""
-    model_config = ConfigDict(extra='forbid')
+
+    model_config = ConfigDict(extra="forbid")
 
     fsq_vae: FSQVAEConfig = Field(default_factory=FSQVAEConfig)
     world_model: WorldModelConfig = Field(default_factory=WorldModelConfig)
@@ -163,7 +183,9 @@ class WorldModelAgentConfig(BaseModel):
 
         # Check action dimensions
         if self.world_model.action_dim != self.controller.action_dim:
-            raise ValueError("Action dimensions must match between world model and controller")
+            raise ValueError(
+                "Action dimensions must match between world model and controller"
+            )
 
 
 if __name__ == "__main__":

@@ -3,9 +3,15 @@
 Example script demonstrating World Model usage.
 """
 
-import torch
 import numpy as np
-from world_models import WorldModelAgentConfig, FSQVAE, WorldModel, EvolutionaryController
+import torch
+
+from world_models import (
+    FSQVAE,
+    EvolutionaryController,
+    WorldModel,
+    WorldModelAgentConfig,
+)
 
 
 def main():
@@ -28,7 +34,9 @@ def main():
 
     print(f"\n📊 Model Statistics:")
     print(f"VAE parameters: {sum(p.numel() for p in vae.parameters()):,}")
-    print(f"World Model parameters: {sum(p.numel() for p in world_model.parameters()):,}")
+    print(
+        f"World Model parameters: {sum(p.numel() for p in world_model.parameters()):,}"
+    )
     print(f"Controller parameters: {sum(p.numel() for p in controller.parameters()):,}")
 
     # Demonstrate forward passes
@@ -53,7 +61,9 @@ def main():
         actions_seq = actions.unsqueeze(1)  # Add time dimension
         state_indices_seq = state_indices.unsqueeze(1)
 
-        next_state_logits, rewards, dones, _ = world_model(state_indices_seq, actions_seq)
+        next_state_logits, rewards, dones, _ = world_model(
+            state_indices_seq, actions_seq
+        )
         print(f"✓ World Model: {state_indices_seq.shape} -> {next_state_logits.shape}")
 
         # Sample next state
@@ -62,16 +72,25 @@ def main():
 
         # Convert back to FSQ representation
         from world_models.models.world_model import indices_to_fsq
-        next_z_q = indices_to_fsq(next_state_indices.squeeze(-1), config.fsq_vae.fsq_levels)
+
+        next_z_q = indices_to_fsq(
+            next_state_indices.squeeze(-1), config.fsq_vae.fsq_levels
+        )
 
         # Decode next state
         next_images = vae.decode(next_z_q)
         print(f"✓ Complete cycle: {images.shape} -> ... -> {next_images.shape}")
 
     print(f"\n🎯 Action Ranges (for CarRacing):")
-    print(f"Steering: [{actions[:, 0].min():.3f}, {actions[:, 0].max():.3f}] (should be [-1, 1])")
-    print(f"Gas: [{actions[:, 1].min():.3f}, {actions[:, 1].max():.3f}] (should be [0, 1])")
-    print(f"Brake: [{actions[:, 2].min():.3f}, {actions[:, 2].max():.3f}] (should be [0, 1])")
+    print(
+        f"Steering: [{actions[:, 0].min():.3f}, {actions[:, 0].max():.3f}] (should be [-1, 1])"
+    )
+    print(
+        f"Gas: [{actions[:, 1].min():.3f}, {actions[:, 1].max():.3f}] (should be [0, 1])"
+    )
+    print(
+        f"Brake: [{actions[:, 2].min():.3f}, {actions[:, 2].max():.3f}] (should be [0, 1])"
+    )
 
     print(f"\n📈 Loss Computation Example:")
     with torch.no_grad():
@@ -81,9 +100,13 @@ def main():
 
         # World model loss
         seq_len = 5
-        current_states = torch.randint(0, world_model.num_state_tokens, (batch_size, seq_len))
+        current_states = torch.randint(
+            0, world_model.num_state_tokens, (batch_size, seq_len)
+        )
         actions_seq = torch.randn(batch_size, seq_len, 3)
-        next_states = torch.randint(0, world_model.num_state_tokens, (batch_size, seq_len))
+        next_states = torch.randint(
+            0, world_model.num_state_tokens, (batch_size, seq_len)
+        )
         rewards_seq = torch.randn(batch_size, seq_len)
         dones_seq = torch.randint(0, 2, (batch_size, seq_len))
 

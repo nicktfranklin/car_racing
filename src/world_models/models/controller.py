@@ -2,10 +2,11 @@
 Controller network for the World Model agent.
 """
 
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple
 
 from ..config import ControllerConfig
 
@@ -22,10 +23,12 @@ class Controller(nn.Module):
         input_size = config.state_dim
 
         for hidden_size in config.hidden_sizes:
-            layers.extend([
-                nn.Linear(input_size, hidden_size),
-                self._get_activation(config.activation),
-            ])
+            layers.extend(
+                [
+                    nn.Linear(input_size, hidden_size),
+                    self._get_activation(config.activation),
+                ]
+            )
             input_size = hidden_size
 
         # Output layer
@@ -39,11 +42,11 @@ class Controller(nn.Module):
     def _get_activation(self, activation: str) -> nn.Module:
         """Get activation function by name."""
         activations = {
-            'relu': nn.ReLU(inplace=True),
-            'tanh': nn.Tanh(),
-            'sigmoid': nn.Sigmoid(),
-            'leaky_relu': nn.LeakyReLU(0.2, inplace=True),
-            'elu': nn.ELU(inplace=True),
+            "relu": nn.ReLU(inplace=True),
+            "tanh": nn.Tanh(),
+            "sigmoid": nn.Sigmoid(),
+            "leaky_relu": nn.LeakyReLU(0.2, inplace=True),
+            "elu": nn.ELU(inplace=True),
         }
         return activations.get(activation, nn.Tanh())
 
@@ -73,19 +76,23 @@ class Controller(nn.Module):
         # Action 2: brake (0 to 1)
 
         if self.config.action_dim == 3:
-            actions = torch.stack([
-                torch.tanh(actions[:, 0]),  # Steering: -1 to 1
-                torch.sigmoid(actions[:, 1]),  # Gas: 0 to 1
-                torch.sigmoid(actions[:, 2])   # Brake: 0 to 1
-            ], dim=1)
+            actions = torch.stack(
+                [
+                    torch.tanh(actions[:, 0]),  # Steering: -1 to 1
+                    torch.sigmoid(actions[:, 1]),  # Gas: 0 to 1
+                    torch.sigmoid(actions[:, 2]),  # Brake: 0 to 1
+                ],
+                dim=1,
+            )
         else:
             # Generic case - apply tanh to all actions
             actions = torch.tanh(actions)
 
         return actions
 
-    def get_action(self, state: torch.Tensor, deterministic: bool = True,
-                  noise_scale: float = 0.1) -> torch.Tensor:
+    def get_action(
+        self, state: torch.Tensor, deterministic: bool = True, noise_scale: float = 0.1
+    ) -> torch.Tensor:
         """
         Get action from the controller with optional exploration noise.
 
@@ -113,11 +120,14 @@ class Controller(nn.Module):
 
                 # Re-apply constraints after adding noise
                 if self.config.action_dim == 3:
-                    action = torch.stack([
-                        torch.clamp(action[:, 0], -1, 1),  # Steering
-                        torch.clamp(action[:, 1], 0, 1),   # Gas
-                        torch.clamp(action[:, 2], 0, 1)    # Brake
-                    ], dim=1)
+                    action = torch.stack(
+                        [
+                            torch.clamp(action[:, 0], -1, 1),  # Steering
+                            torch.clamp(action[:, 1], 0, 1),  # Gas
+                            torch.clamp(action[:, 2], 0, 1),  # Brake
+                        ],
+                        dim=1,
+                    )
                 else:
                     action = torch.clamp(action, -1, 1)
 
@@ -150,11 +160,14 @@ class EvolutionaryController(nn.Module):
 
         # Apply action constraints for CarRacing
         if self.config.action_dim == 3:
-            actions = torch.stack([
-                torch.tanh(actions[:, 0]),  # Steering: -1 to 1
-                torch.sigmoid(actions[:, 1]),  # Gas: 0 to 1
-                torch.sigmoid(actions[:, 2])   # Brake: 0 to 1
-            ], dim=1)
+            actions = torch.stack(
+                [
+                    torch.tanh(actions[:, 0]),  # Steering: -1 to 1
+                    torch.sigmoid(actions[:, 1]),  # Gas: 0 to 1
+                    torch.sigmoid(actions[:, 2]),  # Brake: 0 to 1
+                ],
+                dim=1,
+            )
         else:
             actions = torch.tanh(actions)
 
@@ -172,7 +185,7 @@ class EvolutionaryController(nn.Module):
         idx = 0
         for param in self.parameters():
             param_size = param.numel()
-            param.data.copy_(flat_params[idx:idx + param_size].view(param.shape))
+            param.data.copy_(flat_params[idx : idx + param_size].view(param.shape))
             idx += param_size
 
     def mutate(self, mutation_strength: float = 0.02):
@@ -182,8 +195,9 @@ class EvolutionaryController(nn.Module):
                 param += torch.randn_like(param) * mutation_strength
 
 
-def evaluate_controller(controller: nn.Module, env, num_episodes: int = 5,
-                       max_steps: int = 1000) -> float:
+def evaluate_controller(
+    controller: nn.Module, env, num_episodes: int = 5, max_steps: int = 1000
+) -> float:
     """
     Evaluate a controller in the environment.
 
@@ -242,9 +256,15 @@ if __name__ == "__main__":
     print(f"Input state shape: {state.shape}")
     print(f"Output actions shape: {actions.shape}")
     print(f"Single action shape: {action_single.shape}")
-    print(f"Action ranges - Steering: [{actions[:, 0].min():.3f}, {actions[:, 0].max():.3f}]")
-    print(f"Action ranges - Gas: [{actions[:, 1].min():.3f}, {actions[:, 1].max():.3f}]")
-    print(f"Action ranges - Brake: [{actions[:, 2].min():.3f}, {actions[:, 2].max():.3f}]")
+    print(
+        f"Action ranges - Steering: [{actions[:, 0].min():.3f}, {actions[:, 0].max():.3f}]"
+    )
+    print(
+        f"Action ranges - Gas: [{actions[:, 1].min():.3f}, {actions[:, 1].max():.3f}]"
+    )
+    print(
+        f"Action ranges - Brake: [{actions[:, 2].min():.3f}, {actions[:, 2].max():.3f}]"
+    )
 
     # Test evolutionary controller
     evo_controller = EvolutionaryController(config)

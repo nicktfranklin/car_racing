@@ -79,7 +79,6 @@ class VAETrainer:
                     }
                 )
 
-
             # Record epoch averages
             history["loss"].append(np.mean(epoch_losses))
             history["recon_loss"].append(np.mean(epoch_recon_losses))
@@ -210,7 +209,6 @@ class WorldModelTrainer:
                     }
                 )
 
-
             # Record epoch averages
             history["loss"].append(np.mean(epoch_losses))
             history["state_loss"].append(np.mean(epoch_state_losses))
@@ -299,7 +297,6 @@ class ControllerTrainer:
                 f"Generation {generation+1}: Best = {best_fitness:.2f}, "
                 f"Mean = {mean_fitness:.2f}"
             )
-
 
             # Create next generation
             if generation < num_generations - 1:

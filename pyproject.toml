@@ -37,6 +37,8 @@ dependencies = [
     "matplotlib>=3.5.0",
     "box2d-py>=2.3.0",
     "pygame>=2.1.0",
+    "isort>=5.13.2",
+    "black>=24.8.0",
 ]
 
 [project.optional-dependencies]

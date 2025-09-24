@@ -8,9 +8,9 @@ and LSTM-based world modeling.
 __version__ = "0.1.0"
 
 from .config import WorldModelAgentConfig
-from .models import FSQVAE, WorldModel, Controller, EvolutionaryController
 from .data_collection import DataCollector, ImageDataset, SequenceDataset
-from .training import VAETrainer, WorldModelTrainer, ControllerTrainer
+from .models import FSQVAE, Controller, EvolutionaryController, WorldModel
+from .training import ControllerTrainer, VAETrainer, WorldModelTrainer
 
 __all__ = [
     "WorldModelAgentConfig",

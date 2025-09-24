@@ -2,11 +2,12 @@
 Finite Scalar Quantization VAE (FSQ-VAE) implementation.
 """
 
+from typing import List, Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, List
-import numpy as np
 
 from ..config import FSQVAEConfig
 
@@ -20,7 +21,7 @@ class FSQQuantizer(nn.Module):
         self.dim = len(levels)
 
         # Create quantization bounds for each dimension
-        self.register_buffer('_levels', torch.tensor(levels, dtype=torch.float32))
+        self.register_buffer("_levels", torch.tensor(levels, dtype=torch.float32))
 
         # Compute implicit codebook size
         self.codebook_size = int(np.prod(levels))
@@ -37,7 +38,9 @@ class FSQQuantizer(nn.Module):
                 quantized[..., i] = 0
             else:
                 # Quantize to level discrete values in [-1, 1]
-                quantized[..., i] = torch.round(z[..., i] * (level - 1) / 2) * 2 / (level - 1)
+                quantized[..., i] = (
+                    torch.round(z[..., i] * (level - 1) / 2) * 2 / (level - 1)
+                )
                 quantized[..., i] = torch.clamp(quantized[..., i], -1, 1)
 
         return quantized
@@ -63,7 +66,9 @@ class FSQQuantizer(nn.Module):
         for i, level in enumerate(self.levels):
             if level > 1:
                 # Convert from [-1, 1] to [0, level-1]
-                level_indices = ((z_quantized[..., i] + 1) * (level - 1) / 2).round().long()
+                level_indices = (
+                    ((z_quantized[..., i] + 1) * (level - 1) / 2).round().long()
+                )
                 level_indices = torch.clamp(level_indices, 0, level - 1)
 
                 # Accumulate index (treating as mixed radix)
@@ -85,12 +90,16 @@ class ConvEncoder(nn.Module):
         layers = []
         in_channels = config.input_channels
 
-        for i, (out_channels, stride) in enumerate(zip(config.encoder_channels, config.encoder_strides)):
-            layers.extend([
-                nn.Conv2d(in_channels, out_channels, 4, stride=stride, padding=1),
-                nn.BatchNorm2d(out_channels),
-                nn.ReLU(inplace=True)
-            ])
+        for i, (out_channels, stride) in enumerate(
+            zip(config.encoder_channels, config.encoder_strides)
+        ):
+            layers.extend(
+                [
+                    nn.Conv2d(in_channels, out_channels, 4, stride=stride, padding=1),
+                    nn.BatchNorm2d(out_channels),
+                    nn.ReLU(inplace=True),
+                ]
+            )
             in_channels = out_channels
 
         # Add final convolution to get to latent dimension
@@ -130,25 +139,35 @@ class ConvDecoder(nn.Module):
         # Project latent to initial decoder size
         self.projection = nn.Linear(
             len(config.fsq_levels),  # FSQ quantized representation
-            self.initial_channels * self.initial_h * self.initial_w
+            self.initial_channels * self.initial_h * self.initial_w,
         )
 
         # Decoder layers
         layers = []
         in_channels = self.initial_channels
 
-        for i, (out_channels, stride) in enumerate(zip(config.decoder_channels[1:] + [config.input_channels],
-                                                      config.decoder_strides)):
+        for i, (out_channels, stride) in enumerate(
+            zip(
+                config.decoder_channels[1:] + [config.input_channels],
+                config.decoder_strides,
+            )
+        ):
             if i < len(config.decoder_channels) - 1:
-                layers.extend([
-                    nn.ConvTranspose2d(in_channels, out_channels, 4, stride=stride, padding=1),
-                    nn.BatchNorm2d(out_channels),
-                    nn.ReLU(inplace=True)
-                ])
+                layers.extend(
+                    [
+                        nn.ConvTranspose2d(
+                            in_channels, out_channels, 4, stride=stride, padding=1
+                        ),
+                        nn.BatchNorm2d(out_channels),
+                        nn.ReLU(inplace=True),
+                    ]
+                )
             else:
                 # Final layer - no batch norm or activation
                 layers.append(
-                    nn.ConvTranspose2d(in_channels, out_channels, 4, stride=stride, padding=1)
+                    nn.ConvTranspose2d(
+                        in_channels, out_channels, 4, stride=stride, padding=1
+                    )
                 )
             in_channels = out_channels
 
@@ -190,7 +209,9 @@ class FSQVAE(nn.Module):
         """Decode from quantized representation."""
         return self.decoder(z_q)
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Full forward pass."""
         z = self.encoder(x)
         z_q, indices = self.quantizer(z)
@@ -198,22 +219,23 @@ class FSQVAE(nn.Module):
 
         return x_recon, z, z_q
 
-    def compute_loss(self, x: torch.Tensor, x_recon: torch.Tensor,
-                    z: torch.Tensor, z_q: torch.Tensor) -> Tuple[torch.Tensor, dict]:
+    def compute_loss(
+        self, x: torch.Tensor, x_recon: torch.Tensor, z: torch.Tensor, z_q: torch.Tensor
+    ) -> Tuple[torch.Tensor, dict]:
         """Compute FSQ-VAE loss."""
         # Reconstruction loss
-        recon_loss = F.mse_loss(x_recon, x, reduction='mean')
+        recon_loss = F.mse_loss(x_recon, x, reduction="mean")
 
         # Commitment loss - encourage encoder to commit to quantized values
-        commitment_loss = F.mse_loss(z, z_q.detach(), reduction='mean')
+        commitment_loss = F.mse_loss(z, z_q.detach(), reduction="mean")
 
         # Total loss
         total_loss = recon_loss + self.config.beta * commitment_loss
 
         loss_dict = {
-            'total_loss': total_loss.item(),
-            'recon_loss': recon_loss.item(),
-            'commitment_loss': commitment_loss.item(),
+            "total_loss": total_loss.item(),
+            "recon_loss": recon_loss.item(),
+            "commitment_loss": commitment_loss.item(),
         }
 
         return total_loss, loss_dict
@@ -226,7 +248,9 @@ if __name__ == "__main__":
 
     # Test forward pass
     batch_size = 4
-    x = torch.randn(batch_size, config.input_channels, config.input_height, config.input_width)
+    x = torch.randn(
+        batch_size, config.input_channels, config.input_height, config.input_width
+    )
 
     with torch.no_grad():
         x_recon, z, z_q = model(x)
