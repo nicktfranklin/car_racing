@@ -184,7 +184,7 @@ Desktop.ini
 *.temp
 
 # Model checkpoints and training artifacts
-models/
+# models/
 checkpoints/
 logs/
 runs/
@@ -199,3 +199,5 @@ wandb/
 .idea/
 *.swp
 *.swo
+
+.claude

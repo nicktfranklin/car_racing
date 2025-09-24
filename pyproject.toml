@@ -1,18 +1,123 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "carracing"
+name = "world-models"
 version = "0.1.0"
-description = "Add your description here"
+description = "World Models implementation with FSQ-VAE and LSTM for CarRacing environment"
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-    "box2d-py>=2.3.8",
-    "gymnasium>=1.2.1",
-    "ipykernel>=6.30.1",
-    "jupyter>=1.1.1",
-    "jupyterlab>=4.4.7",
-    "matplotlib>=3.10.6",
-    "notebook>=7.4.5",
-    "pygame>=2.6.1",
-    "torch>=2.8.0",
-    "torchvision>=0.23.0",
+license = {file = "LICENSE"}
+authors = [
+    {name = "CarRacing World Models", email = "noreply@example.com"},
 ]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+keywords = ["reinforcement-learning", "world-models", "fsq-vae", "lstm", "car-racing"]
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "gymnasium>=1.0.0",
+    "numpy>=1.20.0",
+    "pydantic>=2.0.0",
+    "tqdm>=4.60.0",
+    "h5py>=3.0.0",
+    "matplotlib>=3.5.0",
+    "box2d-py>=2.3.0",
+    "pygame>=2.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0.0",
+    "black>=22.0.0",
+    "isort>=5.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.900",
+]
+docs = [
+    "sphinx>=4.0.0",
+    "sphinx-rtd-theme>=1.0.0",
+]
+jupyter = [
+    "ipykernel>=6.0.0",
+    "jupyter>=1.0.0",
+    "jupyterlab>=4.0.0",
+    "notebook>=7.0.0",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/example/world-models"
+"Bug Reports" = "https://github.com/example/world-models/issues"
+"Source" = "https://github.com/example/world-models"
+
+[project.scripts]
+world-models-train = "main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/world_models"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+    "main.py",
+    "test_*.py",
+    "example.py",
+    "hello.py",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+    "pygame.*",
+    "gymnasium.*",
+    "box2d.*",
+    "h5py.*",
+    "matplotlib.*",
+    "tqdm.*",
+]
+ignore_missing_imports = true
