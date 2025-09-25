@@ -43,15 +43,32 @@ def main():
     parser.add_argument(
         "--workers",
         type=int,
-        default=-1,
+        default=1,
         help="Number of parallel workers for data collection (-1 for auto)",
+    )
+    parser.add_argument(
+        "--num-rollouts",
+        type=int,
+        default=None,
+        help="Number of rollouts to collect (overrides config default)",
+    )
+    parser.add_argument(
+        "--max-episode-length",
+        type=int,
+        default=None,
+        help="Maximum episode length (overrides config default)",
+    )
+    parser.add_argument(
+        "--fsq-codebook-size",
+        type=int,
+        default=None,
+        help="FSQ codebook size (adjusts FSQ levels automatically)",
     )
     args = parser.parse_args()
 
     # Load configuration
     if args.config:
-        # TODO: Implement config loading from file
-        config = WorldModelAgentConfig()
+        config = WorldModelAgentConfig.from_yaml(args.config)
     else:
         config = WorldModelAgentConfig()
 
@@ -64,6 +81,16 @@ def main():
 
     # Set parallel workers
     config.data.num_workers = args.workers
+
+    # Override rollout settings if provided
+    if args.num_rollouts is not None:
+        config.data.num_rollouts = args.num_rollouts
+    if args.max_episode_length is not None:
+        config.data.max_episode_length = args.max_episode_length
+
+    # Override FSQ codebook size if provided
+    if args.fsq_codebook_size is not None:
+        config.set_fsq_codebook_size(args.fsq_codebook_size)
 
     # Validate configuration
     config.validate_consistency()

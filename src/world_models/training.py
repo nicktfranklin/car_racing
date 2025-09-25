@@ -36,12 +36,16 @@ class VAETrainer:
 
     def train(self, dataset: ImageDataset, num_epochs: int) -> Dict[str, List[float]]:
         """Train the VAE."""
+        # Optimize dataloader for device
+        pin_memory = self.device.type == "cuda"  # Only pin memory for CUDA
+        num_workers = 0 if self.device.type == "mps" else 2  # Reduce workers for MPS
+
         dataloader = DataLoader(
             dataset,
             batch_size=self.config.training.batch_size,
             shuffle=True,
-            num_workers=4,
-            pin_memory=True,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
         )
 
         self.model.train()
@@ -131,12 +135,16 @@ class WorldModelTrainer:
         self, dataset: SequenceDataset, num_epochs: int
     ) -> Dict[str, List[float]]:
         """Train the world model."""
+        # Optimize dataloader for device
+        pin_memory = self.device.type == "cuda"  # Only pin memory for CUDA
+        num_workers = 0 if self.device.type == "mps" else 2  # Reduce workers for MPS
+
         dataloader = DataLoader(
             dataset,
             batch_size=self.config.training.batch_size,
             shuffle=True,
-            num_workers=4,
-            pin_memory=True,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
         )
 
         self.world_model.train()

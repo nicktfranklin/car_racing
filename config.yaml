@@ -1,0 +1,52 @@
+fsq_vae:
+  input_channels: 3
+  input_height: 64
+  input_width: 64
+  encoder_channels: [32, 64, 128, 256]
+  encoder_strides: [2, 2, 2, 2]
+  fsq_levels: [8, 5, 5, 5]  # 1000 codes
+  latent_dim: 32
+  decoder_channels: [256, 128, 64, 32]
+  decoder_strides: [2, 2, 2, 2]
+  learning_rate: 0.001
+  beta: 1.0
+
+world_model:
+  hidden_size: 256
+  num_layers: 1
+  dropout: 0.0
+  state_dim: 4
+  action_dim: 3
+  fsq_levels: [8, 5, 5, 5]  # Must match fsq_vae
+  learning_rate: 0.001
+  sequence_length: 50
+
+controller:
+  hidden_sizes: [256, 256]
+  activation: tanh
+  state_dim: 4
+  action_dim: 3
+  learning_rate: 0.001
+
+data:
+  env_name: CarRacing-v3
+  render_mode: rgb_array
+  num_rollouts: 10000  # Reduced for faster testing
+  max_episode_length: 200  # Reduced for faster testing
+  num_workers: 1
+  batch_size: 100
+  frame_skip: 4
+  frame_stack: 1
+  data_dir: ./data
+
+training:
+  device: cuda
+  batch_size: 32
+  num_epochs: 100
+  train_vae_epochs: 50
+  train_world_model_epochs: 50
+  train_controller_epochs: 100
+  eval_every: 10
+  save_every: 25
+  log_every: 100
+  checkpoint_dir: ./checkpoints

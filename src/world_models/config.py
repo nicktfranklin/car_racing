@@ -2,7 +2,9 @@
 Configuration models for World Model agent with FSQ-VAE and LSTM.
 """
 
-from typing import List, Optional, Tuple
+import yaml
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -186,6 +188,62 @@ class WorldModelAgentConfig(BaseModel):
             raise ValueError(
                 "Action dimensions must match between world model and controller"
             )
+
+    @classmethod
+    def from_yaml(cls, yaml_path: Union[str, Path]) -> "WorldModelAgentConfig":
+        """Load configuration from YAML file."""
+        yaml_path = Path(yaml_path)
+        if not yaml_path.exists():
+            raise FileNotFoundError(f"Config file not found: {yaml_path}")
+
+        with open(yaml_path, 'r') as f:
+            config_dict = yaml.safe_load(f)
+
+        return cls(**config_dict)
+
+    def to_yaml(self, yaml_path: Union[str, Path]) -> None:
+        """Save configuration to YAML file."""
+        yaml_path = Path(yaml_path)
+        yaml_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(yaml_path, 'w') as f:
+            yaml.dump(self.model_dump(), f, default_flow_style=False, indent=2)
+
+    def set_fsq_codebook_size(self, codebook_size: int) -> None:
+        """Set FSQ codebook size by adjusting levels to achieve target size."""
+        # Find optimal level distribution for target codebook size
+        levels = self._compute_fsq_levels(codebook_size)
+        self.fsq_vae.fsq_levels = levels
+        self.world_model.fsq_levels = levels
+        # Update dimensions
+        self.world_model.state_dim = len(levels)
+        self.controller.state_dim = len(levels)
+
+    def _compute_fsq_levels(self, target_size: int) -> List[int]:
+        """Compute FSQ levels to achieve approximately target codebook size."""
+        if target_size <= 0:
+            raise ValueError("Codebook size must be positive")
+
+        # Common FSQ level configurations that work well
+        if target_size <= 64:
+            return [8, 8]  # 64 codes
+        elif target_size <= 125:
+            return [5, 5, 5]  # 125 codes
+        elif target_size <= 256:
+            return [8, 8, 4]  # 256 codes
+        elif target_size <= 512:
+            return [8, 8, 8]  # 512 codes
+        elif target_size <= 1000:
+            return [8, 5, 5, 5]  # 1000 codes
+        elif target_size <= 2048:
+            return [8, 8, 8, 4]  # 2048 codes
+        elif target_size <= 4096:
+            return [8, 8, 8, 8]  # 4096 codes
+        else:
+            # For larger sizes, use 5 dimensions with high levels
+            import math
+            level = int(math.ceil(target_size ** (1/5)))
+            return [level] * 5
 
 
 if __name__ == "__main__":
