@@ -79,6 +79,7 @@ def collect_episodes_worker(args: Tuple[str, str, int, int, int]) -> List[Episod
 
         # Preprocess observation
         from skimage.transform import resize
+
         obs = obs.astype(np.float32) / 255.0
         obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True)
 
@@ -88,7 +89,9 @@ def collect_episodes_worker(args: Tuple[str, str, int, int, int]) -> List[Episod
 
             # Preprocess next observation
             next_obs = next_obs.astype(np.float32) / 255.0
-            next_obs = resize(next_obs, (64, 64), anti_aliasing=True, preserve_range=True)
+            next_obs = resize(
+                next_obs, (64, 64), anti_aliasing=True, preserve_range=True
+            )
 
             episode.add_step(obs, action, reward, terminated or truncated)
             obs = next_obs
@@ -250,6 +253,7 @@ class DataCollector:
 
         # Resize from 96x96 to 64x64
         from skimage.transform import resize
+
         obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True)
 
         return obs

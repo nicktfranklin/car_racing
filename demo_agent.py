@@ -12,7 +12,7 @@ import numpy as np
 import pygame
 import torch
 
-from src.world_models import WorldModelAgentConfig, FSQVAE, EvolutionaryController
+from src.world_models import FSQVAE, EvolutionaryController, WorldModelAgentConfig
 from src.world_models.agents import Agent, create_agent
 from src.world_models.training import VAETrainer
 
@@ -27,7 +27,7 @@ def handle_pygame_events(human_agent):
             return False
 
     # Update human agent actions based on keys
-    if hasattr(human_agent, 'update_action'):
+    if hasattr(human_agent, "update_action"):
         steering = 0.0
         gas = 0.0
         brake = 0.0
@@ -47,12 +47,16 @@ def handle_pygame_events(human_agent):
     return True
 
 
-def load_world_model_agent(config: WorldModelAgentConfig, device: str) -> Optional[Agent]:
+def load_world_model_agent(
+    config: WorldModelAgentConfig, device: str
+) -> Optional[Agent]:
     """Load trained World Model agent."""
     try:
         # Load VAE
         vae = FSQVAE(config.fsq_vae)
-        vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
+        vae_checkpoint_path = os.path.join(
+            config.training.checkpoint_dir, "vae_latest.pth"
+        )
 
         if os.path.exists(vae_checkpoint_path):
             vae_trainer = VAETrainer(vae, config)
@@ -64,7 +68,9 @@ def load_world_model_agent(config: WorldModelAgentConfig, device: str) -> Option
 
         # Load Controller
         controller = EvolutionaryController(config.controller)
-        controller_checkpoint_path = os.path.join(config.training.checkpoint_dir, "best_controller.pth")
+        controller_checkpoint_path = os.path.join(
+            config.training.checkpoint_dir, "best_controller.pth"
+        )
 
         if os.path.exists(controller_checkpoint_path):
             controller.load_state_dict(torch.load(controller_checkpoint_path))
@@ -74,6 +80,7 @@ def load_world_model_agent(config: WorldModelAgentConfig, device: str) -> Option
             return None
 
         from src.world_models.agents import WorldModelAgent
+
         return WorldModelAgent(vae, controller, device)
 
     except Exception as e:
@@ -81,7 +88,7 @@ def load_world_model_agent(config: WorldModelAgentConfig, device: str) -> Option
         return None
 
 
-def run_demo(agent: Agent, env_name: str = "CarRacing-v3", max_steps: int = 1000):
+def run_demo(agent: Agent, env_name: str = "CarRacing-v3", max_steps: int = 10_000):
     """Run real-time agent demonstration."""
     # Create environment
     env = gym.make(env_name, render_mode="human")
@@ -106,7 +113,7 @@ def run_demo(agent: Agent, env_name: str = "CarRacing-v3", max_steps: int = 1000
 
             while step < max_steps:
                 # Handle pygame events (for human control and quit)
-                if hasattr(agent, 'update_action'):
+                if hasattr(agent, "update_action"):
                     if not handle_pygame_events(agent):
                         return
                 else:
@@ -155,38 +162,32 @@ def main():
         type=str,
         choices=["random", "human", "world_model", "constant"],
         default="random",
-        help="Agent type to use"
+        help="Agent type to use",
     )
     parser.add_argument(
         "--config",
         type=str,
         default=None,
-        help="Config file path (required for world_model agent)"
+        help="Config file path (required for world_model agent)",
     )
     parser.add_argument(
-        "--env",
-        type=str,
-        default="CarRacing-v3",
-        help="Environment name"
+        "--env", type=str, default="CarRacing-v3", help="Environment name"
     )
     parser.add_argument(
-        "--max-steps",
-        type=int,
-        default=1000,
-        help="Maximum steps per episode"
+        "--max-steps", type=int, default=2000, help="Maximum steps per episode"
     )
     parser.add_argument(
         "--device",
         type=str,
         default="auto",
-        help="Device for World Model agent (cpu/cuda/mps/auto)"
+        help="Device for World Model agent (cpu/cuda/mps/auto)",
     )
     parser.add_argument(
         "--constant-action",
         type=float,
         nargs=3,
         default=[0.0, 0.5, 0.0],
-        help="Action for constant agent [steering, gas, brake]"
+        help="Action for constant agent [steering, gas, brake]",
     )
 
     args = parser.parse_args()

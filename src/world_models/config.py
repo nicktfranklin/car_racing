@@ -2,10 +2,10 @@
 Configuration models for World Model agent with FSQ-VAE and LSTM.
 """
 
-import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -196,7 +196,7 @@ class WorldModelAgentConfig(BaseModel):
         if not yaml_path.exists():
             raise FileNotFoundError(f"Config file not found: {yaml_path}")
 
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path, "r") as f:
             config_dict = yaml.safe_load(f)
 
         return cls(**config_dict)
@@ -206,7 +206,7 @@ class WorldModelAgentConfig(BaseModel):
         yaml_path = Path(yaml_path)
         yaml_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(yaml_path, 'w') as f:
+        with open(yaml_path, "w") as f:
             yaml.dump(self.model_dump(), f, default_flow_style=False, indent=2)
 
     def set_fsq_codebook_size(self, codebook_size: int) -> None:
@@ -242,7 +242,8 @@ class WorldModelAgentConfig(BaseModel):
         else:
             # For larger sizes, use 5 dimensions with high levels
             import math
-            level = int(math.ceil(target_size ** (1/5)))
+
+            level = int(math.ceil(target_size ** (1 / 5)))
             return [level] * 5
 
 

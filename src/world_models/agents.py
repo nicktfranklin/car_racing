@@ -4,6 +4,7 @@ Agent interfaces and implementations for World Model demonstration.
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -61,7 +62,9 @@ class HumanAgent(Agent):
         """Reset to neutral action."""
         self.action = np.array([0.0, 0.0, 0.0])
 
-    def update_action(self, steering: float = 0.0, gas: float = 0.0, brake: float = 0.0):
+    def update_action(
+        self, steering: float = 0.0, gas: float = 0.0, brake: float = 0.0
+    ):
         """Update action from keyboard input."""
         self.action[0] = steering
         self.action[1] = gas
@@ -93,7 +96,10 @@ class WorldModelAgent(Agent):
 
         # Preprocess observation (resize from 96x96 to 64x64)
         from skimage.transform import resize
-        obs_resized = resize(observation, (64, 64), anti_aliasing=True, preserve_range=True)
+
+        obs_resized = resize(
+            observation, (64, 64), anti_aliasing=True, preserve_range=True
+        )
         obs_tensor = (
             torch.from_numpy(obs_resized.astype(np.float32) / 255.0)
             .permute(2, 0, 1)
