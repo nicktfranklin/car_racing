@@ -19,7 +19,7 @@ world_model:
   action_dim: 3
   fsq_levels: [8, 5, 5, 5]  # Must match fsq_vae
   learning_rate: 0.001
-  sequence_length: 50
+  sequence_length: 10
 
 controller:
   hidden_sizes: [256, 256]
@@ -31,8 +31,8 @@ controller:
 data:
   env_name: CarRacing-v3
   render_mode: rgb_array
-  num_rollouts: 10000  # Reduced for faster testing
-  max_episode_length: 200  # Reduced for faster testing
+  num_rollouts: 5  # Very small for testing
+  max_episode_length: 100  # Small for testing but allows sequences
   num_workers: 1
   batch_size: 100
   frame_skip: 4
@@ -40,12 +40,12 @@ data:
   data_dir: ./data
 
 training:
-  device: mps
+  device: cpu
   batch_size: 32
   num_epochs: 100
-  train_vae_epochs: 50
-  train_world_model_epochs: 50
-  train_controller_epochs: 100
+  train_vae_epochs: 3  # Reduced for testing
+  train_world_model_epochs: 3  # Reduced for testing
+  train_controller_epochs: 3  # Reduced for testing
   eval_every: 10
   save_every: 25
   log_every: 100

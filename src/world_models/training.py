@@ -105,7 +105,7 @@ class VAETrainer:
 
     def load_checkpoint(self, filepath: str):
         """Load model checkpoint."""
-        checkpoint = torch.load(filepath, map_location=self.device)
+        checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
@@ -244,7 +244,7 @@ class WorldModelTrainer:
 
     def load_checkpoint(self, filepath: str):
         """Load model checkpoint."""
-        checkpoint = torch.load(filepath, map_location=self.device)
+        checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
         self.world_model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
@@ -348,6 +348,7 @@ class ControllerTrainer:
 
                 # Encode initial state
                 z_q, state_indices = self.vae.encode(obs)
+                state_indices = state_indices.unsqueeze(1)  # Add time dimension: [1, 1, state_dim]
 
                 # Initialize world model hidden state
                 hidden = self.world_model.init_hidden(1, self.device)
@@ -360,10 +361,8 @@ class ControllerTrainer:
                         break
 
                     # Get action from controller
-                    action = controller(z_q.squeeze(0))  # Remove batch dimension
-                    action = action.unsqueeze(0).unsqueeze(
-                        0
-                    )  # Add batch and time dimensions
+                    action = controller(z_q)  # z_q has shape [1, state_dim]
+                    action = action.unsqueeze(1)  # Add time dimension: [1, 1, action_dim]
 
                     # Predict next state using world model
                     next_state_logits, reward, done_logit, hidden = self.world_model(
@@ -374,15 +373,18 @@ class ControllerTrainer:
                     next_state_probs = torch.softmax(next_state_logits, dim=-1)
                     next_state_indices = torch.multinomial(
                         next_state_probs.squeeze(1), 1
-                    )
+                    ).unsqueeze(1)  # Add time dimension back: [1, 1, state_dim]
 
                     # Convert back to FSQ representation
-                    from models.world_model import indices_to_fsq
+                    from .models.world_model import indices_to_fsq
 
                     z_q = indices_to_fsq(
-                        next_state_indices.squeeze(-1), self.config.fsq_vae.fsq_levels
+                        next_state_indices.squeeze(-1).squeeze(1), self.config.fsq_vae.fsq_levels
                     )
                     z_q = z_q.unsqueeze(0)  # Add batch dimension
+
+                    # Update state indices for next iteration
+                    state_indices = next_state_indices
 
                     # Update episode return
                     episode_return += reward.item()

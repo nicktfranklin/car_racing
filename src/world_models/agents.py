@@ -91,9 +91,11 @@ class WorldModelAgent(Agent):
             # Fallback to random if models not loaded
             return np.random.uniform(-1, 1, 3)
 
-        # Preprocess observation
+        # Preprocess observation (resize from 96x96 to 64x64)
+        from skimage.transform import resize
+        obs_resized = resize(observation, (64, 64), anti_aliasing=True, preserve_range=True)
         obs_tensor = (
-            torch.from_numpy(observation.astype(np.float32) / 255.0)
+            torch.from_numpy(obs_resized.astype(np.float32) / 255.0)
             .permute(2, 0, 1)
             .unsqueeze(0)
             .to(self.device)

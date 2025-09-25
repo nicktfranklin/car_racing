@@ -75,6 +75,36 @@ uv pip install .
 
 ## 📊 Usage
 
+### Real-time Agent Visualization
+
+Watch agents interact with the CarRacing environment in real-time:
+
+```bash
+# Random agent (default)
+uv run python demo_agent.py
+
+# Human player (use arrow keys or WASD)
+uv run python demo_agent.py --agent human
+
+# Trained World Model agent
+uv run python demo_agent.py --agent world_model --config config.yaml
+
+# Constant action agent
+uv run python demo_agent.py --agent constant --constant-action 0.5 1.0 0.0
+```
+
+**Available Agent Types:**
+- **Random**: Samples random actions uniformly
+- **Human**: Keyboard-controlled (Arrow keys or WASD)
+- **World Model**: Uses trained VAE + Controller
+- **Constant**: Performs fixed actions (useful for debugging)
+
+**Demo Features:**
+- Real-time visualization at ~50 FPS
+- Episode statistics (steps, rewards, duration)
+- Graceful fallbacks if models can't load
+- Cross-platform keyboard controls
+
 ### Quick Test
 
 ```bash
@@ -104,9 +134,27 @@ uv run python main.py --stage controller
 uv run python main.py --stage all
 ```
 
+### Advanced Training Options
+
+The training pipeline supports flexible configuration via YAML files and command-line arguments:
+
+```bash
+# Use YAML configuration file
+uv run python main.py --config config.yaml --stage all
+
+# Override specific parameters
+uv run python main.py --config config.yaml --num-rollouts 100 --max-episode-length 200
+
+# Set FSQ codebook size directly
+uv run python main.py --fsq-codebook-size 256 --stage vae
+
+# Quick testing with reduced data
+uv run python main.py --config test_config.yaml --stage all
+```
+
 ### Configuration
 
-All configurations are managed through Pydantic models:
+All configurations are managed through Pydantic models and YAML files:
 
 ```python
 from world_models import WorldModelAgentConfig
@@ -116,6 +164,30 @@ config.fsq_vae.fsq_levels = [8, 5, 5, 5]  # 1000 discrete codes
 config.world_model.hidden_size = 256
 config.controller.state_dim = 4  # FSQ dimensions
 config.training.batch_size = 32
+```
+
+**Example YAML Configuration:**
+```yaml
+fsq_vae:
+  input_height: 64
+  input_width: 64
+  fsq_levels: [8, 5, 5, 5]  # 1000 codes
+  learning_rate: 0.001
+
+world_model:
+  hidden_size: 256
+  sequence_length: 50
+
+data:
+  num_rollouts: 100
+  max_episode_length: 200
+  num_workers: 1
+
+training:
+  device: cpu
+  train_vae_epochs: 50
+  train_world_model_epochs: 50
+  train_controller_epochs: 100
 ```
 
 ### Python API Usage
@@ -179,6 +251,9 @@ controller_trainer = ControllerTrainer(vae, world_model, config)
 │       ├── world_model.py   # LSTM world model
 │       └── controller.py    # Controller networks
 ├── main.py                   # Main training pipeline script
+├── demo_agent.py            # Real-time agent visualization
+├── config.yaml              # Example YAML configuration
+├── test_config.yaml         # Quick testing configuration
 ├── test_models.py           # Component testing
 ├── example.py               # Usage demonstration
 ├── hello.py                 # Simple CarRacing demo
@@ -189,11 +264,13 @@ controller_trainer = ControllerTrainer(vae, world_model, config)
 
 ## 🎯 Key Features
 
+- **Real-time Visualization**: Interactive agent demonstration system
 - **Modular Design**: Each component can be trained independently
-- **Configuration Management**: Type-safe configs with Pydantic
+- **YAML Configuration**: Flexible config management with command-line overrides
+- **Multiple Agent Types**: Random, Human, World Model, and Constant agents
 - **Efficient Storage**: HDF5 for large datasets
 - **Resumable Training**: Checkpoint saving/loading
-- **Multiple Controllers**: Both evolutionary and gradient-based
+- **64x64 Input Processing**: Automatic image resizing from CarRacing's 96x96
 
 ## 📈 Training Process
 

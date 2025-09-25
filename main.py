@@ -328,9 +328,11 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
         episode_return = 0.0
 
         for step in range(config.data.max_episode_length):
-            # Preprocess observation
+            # Preprocess observation (resize from 96x96 to 64x64)
+            from skimage.transform import resize
+            obs_resized = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True)
             obs_tensor = (
-                torch.from_numpy(obs.astype(np.float32) / 255.0)
+                torch.from_numpy(obs_resized.astype(np.float32) / 255.0)
                 .permute(2, 0, 1)
                 .unsqueeze(0)
                 .to(device)

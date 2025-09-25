@@ -78,7 +78,9 @@ def collect_episodes_worker(args: Tuple[str, str, int, int, int]) -> List[Episod
         obs, _ = env.reset()
 
         # Preprocess observation
+        from skimage.transform import resize
         obs = obs.astype(np.float32) / 255.0
+        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True)
 
         for step in range(max_episode_length):
             action = agent.get_action(obs)
@@ -86,6 +88,7 @@ def collect_episodes_worker(args: Tuple[str, str, int, int, int]) -> List[Episod
 
             # Preprocess next observation
             next_obs = next_obs.astype(np.float32) / 255.0
+            next_obs = resize(next_obs, (64, 64), anti_aliasing=True, preserve_range=True)
 
             episode.add_step(obs, action, reward, terminated or truncated)
             obs = next_obs
@@ -245,8 +248,9 @@ class DataCollector:
         # Convert to float and normalize to [0, 1]
         obs = obs.astype(np.float32) / 255.0
 
-        # Resize if needed (CarRacing is already 96x96)
-        # You could add resizing logic here if needed
+        # Resize from 96x96 to 64x64
+        from skimage.transform import resize
+        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True)
 
         return obs
 

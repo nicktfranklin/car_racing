@@ -40,6 +40,7 @@ dependencies = [
     "isort>=5.13.2",
     "black>=24.8.0",
     "pyyaml>=6.0.0",
+    "scikit-image>=0.19.0",
 ]
 
 [project.optional-dependencies]
