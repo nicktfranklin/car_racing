@@ -61,12 +61,15 @@ class RandomAgent:
         return self.action_space.sample()
 
 
-def collect_episodes_worker(args: Tuple[str, str, int, int, int]) -> List[Episode]:
+def collect_episodes_worker(args: Tuple[str, Optional[str], int, int, int]) -> List[Episode]:
     """Worker function for parallel episode collection."""
     env_name, render_mode, num_episodes, max_episode_length, worker_id = args
 
-    # Create environment for this worker
-    env = gym.make(env_name, render_mode=render_mode)
+    # Create environment for this worker (None render mode for fastest collection)
+    if render_mode is None:
+        env = gym.make(env_name)
+    else:
+        env = gym.make(env_name, render_mode=render_mode)
     agent = RandomAgent(env.action_space)
     episodes = []
 
@@ -114,7 +117,10 @@ class DataCollector:
 
     def setup_env(self):
         """Setup the environment."""
-        self.env = gym.make(self.config.env_name, render_mode=self.config.render_mode)
+        if self.config.render_mode is None:
+            self.env = gym.make(self.config.env_name)
+        else:
+            self.env = gym.make(self.config.env_name, render_mode=self.config.render_mode)
         print(f"Environment: {self.config.env_name}")
         print(f"Action space: {self.env.action_space}")
         print(f"Observation space: {self.env.observation_space}")
@@ -124,10 +130,10 @@ class DataCollector:
         # Determine number of workers
         num_workers = self.config.num_workers
         if num_workers == -1:
-            num_workers = min(mp.cpu_count(), 8)  # Cap at 8 to avoid overload
+            num_workers = min(mp.cpu_count(), 16)  # Increased cap for faster collection
 
-        # Use single-threaded for small collections or when explicitly set to 1
-        if num_episodes < 50 or num_workers == 1:
+        # Use single-threaded for very small collections or when explicitly set to 1
+        if num_episodes < 20 or num_workers == 1:
             return self._collect_episodes_sequential(num_episodes)
         else:
             return self._collect_episodes_parallel(num_episodes, num_workers)

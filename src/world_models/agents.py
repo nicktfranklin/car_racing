@@ -30,22 +30,40 @@ class Agent(ABC):
 
 
 class RandomAgent(Agent):
-    """Random agent that samples actions uniformly."""
+    """Random agent with more stochastic behavior for interesting driving patterns."""
 
     def __init__(self, action_space):
         self.action_space = action_space
+        self.action_bias = np.array([0.0, 0.0, 0.0])  # [steering, gas, brake]
+        self.action_persistence = 0.8  # How much to keep previous action
+        self.last_action = np.array([0.0, 0.5, 0.0])  # Start with some gas
 
     def get_action(self, observation: np.ndarray) -> np.ndarray:
-        """Get random action."""
-        return self.action_space.sample()
+        """Get random action with more stochastic behavior."""
+        # Generate new random components with higher variance
+        random_steering = np.random.normal(0, 0.5)  # More aggressive steering
+        random_gas = np.random.choice([0.0, 0.3, 0.7, 1.0], p=[0.1, 0.3, 0.4, 0.2])  # Discrete gas choices
+        random_brake = np.random.choice([0.0, 0.8], p=[0.85, 0.15])  # Occasional hard braking
+
+        new_action = np.array([random_steering, random_gas, random_brake])
+
+        # Add some persistence to make movements more coherent
+        action = (self.action_persistence * self.last_action +
+                 (1 - self.action_persistence) * new_action)
+
+        # Clip to valid range
+        action = np.clip(action, -1.0, 1.0)
+
+        self.last_action = action
+        return action
 
     def reset(self) -> None:
-        """Nothing to reset for random agent."""
-        pass
+        """Reset action state for new episode."""
+        self.last_action = np.array([0.0, 0.5, 0.0])
 
     @property
     def name(self) -> str:
-        return "Random Agent"
+        return "Stochastic Random Agent"
 
 
 class HumanAgent(Agent):

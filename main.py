@@ -64,6 +64,11 @@ def main():
         default=None,
         help="FSQ codebook size (adjusts FSQ levels automatically)",
     )
+    parser.add_argument(
+        "--no-render",
+        action="store_true",
+        help="Disable rendering for fastest data collection",
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -91,6 +96,10 @@ def main():
     # Override FSQ codebook size if provided
     if args.fsq_codebook_size is not None:
         config.set_fsq_codebook_size(args.fsq_codebook_size)
+
+    # Set render mode for data collection performance
+    if args.no_render:
+        config.data.render_mode = None
 
     # Validate configuration
     config.validate_consistency()

@@ -90,8 +90,8 @@ def load_world_model_agent(
 
 def run_demo(agent: Agent, env_name: str = "CarRacing-v3", max_steps: int = 10_000):
     """Run real-time agent demonstration."""
-    # Create environment
-    env = gym.make(env_name, render_mode="human")
+    # Create environment with custom max episode steps
+    env = gym.make(env_name, render_mode="human", max_episode_steps=max_steps)
 
     print(f"🚗 Starting real-time demo with {agent.name}")
     print("Controls (for Human agent): Arrow keys or WASD to control, ESC to quit")

@@ -105,7 +105,9 @@ class DataConfig(BaseModel):
     env_name: str = Field(
         default="CarRacing-v3", description="Gymnasium environment name"
     )
-    render_mode: str = Field(default="rgb_array", description="Rendering mode")
+    render_mode: Optional[str] = Field(
+        default=None, description="Rendering mode (None for fastest collection)"
+    )
 
     # Data collection
     num_rollouts: int = Field(
