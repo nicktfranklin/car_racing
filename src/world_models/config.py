@@ -121,6 +121,11 @@ class DataConfig(BaseModel):
     )
     batch_size: int = Field(default=100, description="Episodes per worker batch")
 
+    # Checkpointing
+    checkpoint_every: int = Field(
+        default=100, description="Save checkpoint every N episodes"
+    )
+
     # Data processing
     frame_skip: int = Field(default=4, description="Frame skip for data collection")
     frame_stack: int = Field(default=1, description="Number of frames to stack")

@@ -41,15 +41,21 @@ class RandomAgent(Agent):
     def get_action(self, observation: np.ndarray) -> np.ndarray:
         """Get random action with more stochastic behavior."""
         # Generate new random components with higher variance
-        random_steering = np.random.normal(0, 0.5)  # More aggressive steering
-        random_gas = np.random.choice([0.0, 0.3, 0.7, 1.0], p=[0.1, 0.3, 0.4, 0.2])  # Discrete gas choices
-        random_brake = np.random.choice([0.0, 0.8], p=[0.85, 0.15])  # Occasional hard braking
+        random_steering = np.random.normal(0, 0.4)  # More aggressive steering
+        random_gas = np.random.choice(
+            [0.0, 0.3, 0.7, 1.0], p=[0.1, 0.3, 0.4, 0.2]
+        )  # Discrete gas choices
+        random_brake = np.random.choice(
+            [0.0, 0.8], p=[0.85, 0.15]
+        )  # Occasional hard braking
 
         new_action = np.array([random_steering, random_gas, random_brake])
 
         # Add some persistence to make movements more coherent
-        action = (self.action_persistence * self.last_action +
-                 (1 - self.action_persistence) * new_action)
+        action = (
+            self.action_persistence * self.last_action
+            + (1 - self.action_persistence) * new_action
+        )
 
         # Clip to valid range
         action = np.clip(action, -1.0, 1.0)

@@ -69,6 +69,12 @@ def main():
         action="store_true",
         help="Disable rendering for fastest data collection",
     )
+    parser.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=100,
+        help="Save checkpoint every N episodes during data collection",
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -116,7 +122,7 @@ def main():
         print("\n" + "=" * 50)
         print("STAGE 1: DATA COLLECTION")
         print("=" * 50)
-        collect_data(config, args.data_file)
+        collect_data(config, args.data_file, args.checkpoint_every)
 
     if args.stage in ["vae", "all"]:
         print("\n" + "=" * 50)
@@ -139,21 +145,16 @@ def main():
     print("\nTraining pipeline completed!")
 
 
-def collect_data(config: WorldModelAgentConfig, data_file: str):
-    """Collect training data."""
+def collect_data(config: WorldModelAgentConfig, data_file: str, checkpoint_every: int = 100):
+    """Collect training data with checkpointing."""
     collector = DataCollector(config.data)
 
-    # Check if data already exists
-    data_path = os.path.join(config.data.data_dir, data_file)
-    if os.path.exists(data_path):
-        print(f"Data file {data_path} already exists. Skipping collection.")
-        return
-
-    print(f"Collecting {config.data.num_rollouts} episodes...")
-    episodes = collector.collect_random_episodes(config.data.num_rollouts)
-
-    print("Saving data...")
-    collector.save_episodes(episodes, data_file)
+    print(f"Collecting {config.data.num_rollouts} episodes with checkpointing...")
+    episodes = collector.collect_random_episodes(
+        config.data.num_rollouts,
+        data_file=data_file,
+        checkpoint_every=checkpoint_every
+    )
 
     collector.close()
     print("Data collection completed!")

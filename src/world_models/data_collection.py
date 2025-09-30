@@ -125,8 +125,58 @@ class DataCollector:
         print(f"Action space: {self.env.action_space}")
         print(f"Observation space: {self.env.observation_space}")
 
-    def collect_random_episodes(self, num_episodes: int) -> List[Episode]:
-        """Collect episodes using random actions (with optional parallelization)."""
+    def collect_random_episodes(self, num_episodes: int, data_file: str = None, checkpoint_every: int = 100) -> List[Episode]:
+        """Collect episodes using random actions with checkpointing support."""
+        if data_file is None:
+            # No checkpointing, collect all at once
+            return self._collect_episodes_no_checkpoint(num_episodes)
+
+        # Check existing progress
+        existing_count = self.count_episodes(data_file)
+        remaining = num_episodes - existing_count
+
+        if remaining <= 0:
+            print(f"✅ Already have {existing_count} episodes (target: {num_episodes})")
+            return self.load_episodes(data_file)
+
+        print(f"📊 Progress: {existing_count}/{num_episodes} episodes completed")
+        print(f"🔄 Collecting remaining {remaining} episodes...")
+
+        # Collect in chunks with checkpointing
+        all_episodes = []
+        if existing_count > 0:
+            print(f"📁 Loading existing {existing_count} episodes...")
+            all_episodes = self.load_episodes(data_file)
+
+        episodes_collected = 0
+
+        while episodes_collected < remaining:
+            # Determine chunk size
+            chunk_size = min(checkpoint_every, remaining - episodes_collected)
+
+            print(f"\n🎯 Collecting chunk: {chunk_size} episodes ({episodes_collected + existing_count + chunk_size}/{num_episodes} total)")
+
+            # Collect chunk
+            chunk_episodes = self._collect_episodes_no_checkpoint(chunk_size)
+
+            # Save checkpoint
+            if existing_count == 0 and episodes_collected == 0:
+                # First chunk, create new file
+                self.save_episodes(chunk_episodes, data_file)
+            else:
+                # Append to existing file
+                self.append_episodes(chunk_episodes, data_file)
+
+            all_episodes.extend(chunk_episodes)
+            episodes_collected += len(chunk_episodes)
+
+            print(f"💾 Checkpoint saved: {existing_count + episodes_collected}/{num_episodes} episodes")
+
+        print(f"✅ Data collection completed: {len(all_episodes)} episodes total")
+        return all_episodes
+
+    def _collect_episodes_no_checkpoint(self, num_episodes: int) -> List[Episode]:
+        """Collect episodes without checkpointing (original method)."""
         # Determine number of workers
         num_workers = self.config.num_workers
         if num_workers == -1:
@@ -281,6 +331,41 @@ class DataCollector:
                 ep_group.create_dataset("dones", data=dones)
 
         print(f"Saved {len(episodes)} episodes to {filepath}")
+
+    def append_episodes(self, episodes: List[Episode], filename: str):
+        """Append episodes to existing file."""
+        os.makedirs(self.config.data_dir, exist_ok=True)
+        filepath = os.path.join(self.config.data_dir, filename)
+
+        # Get current episode count
+        existing_count = self.count_episodes(filename)
+
+        # Append as HDF5
+        with h5py.File(filepath, "a") as f:
+            for i, episode in enumerate(tqdm(episodes, desc="Appending episodes")):
+                obs, actions, rewards, dones = episode.to_arrays()
+
+                ep_idx = existing_count + i
+                ep_group = f.create_group(f"episode_{ep_idx}")
+                ep_group.create_dataset("observations", data=obs, compression="gzip")
+                ep_group.create_dataset("actions", data=actions)
+                ep_group.create_dataset("rewards", data=rewards)
+                ep_group.create_dataset("dones", data=dones)
+
+        print(f"Appended {len(episodes)} episodes to {filepath}")
+
+    def count_episodes(self, filename: str) -> int:
+        """Count episodes in existing file."""
+        filepath = os.path.join(self.config.data_dir, filename)
+
+        if not os.path.exists(filepath):
+            return 0
+
+        try:
+            with h5py.File(filepath, "r") as f:
+                return len([key for key in f.keys() if key.startswith("episode_")])
+        except Exception:
+            return 0
 
     def load_episodes(self, filename: str) -> List[Episode]:
         """Load episodes from disk."""
