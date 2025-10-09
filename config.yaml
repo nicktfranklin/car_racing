@@ -33,7 +33,7 @@ data:
   render_mode: null
   num_rollouts: 10000 
   max_episode_length: 2000  
-  num_workers: 2
+  num_workers: 1
   batch_size: 100
   frame_skip: 4
   frame_stack: 1

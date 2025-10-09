@@ -2,6 +2,7 @@
 Data collection system for World Model training.
 """
 
+import gc
 import multiprocessing as mp
 import os
 import time
@@ -106,6 +107,10 @@ def collect_episodes_worker(
 
         episodes.append(episode)
 
+        # Cleanup after each episode to reduce memory pressure
+        if (i + 1) % 10 == 0:
+            gc.collect()
+
     env.close()
     return episodes
 
@@ -177,7 +182,10 @@ class DataCollector:
                 file_idx = (existing_count + episodes_collected) // checkpoint_every
                 chunk_file = self._get_chunk_filename(data_file, file_idx)
                 self.save_episodes(chunk_episodes, chunk_file)
-                chunk_episodes = None
+
+                # Explicit memory cleanup
+                del chunk_episodes
+                gc.collect()
 
                 episodes_collected += chunk_count
 
@@ -297,8 +305,8 @@ class DataCollector:
         all_episodes = []
 
         # Use ProcessPoolExecutor with sliding window to limit memory usage
-        # Only keep 2x num_workers tasks in flight at once
-        max_in_flight = num_workers * 2
+        # Only keep num_workers tasks in flight at once to reduce memory pressure
+        max_in_flight = num_workers
 
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
             futures = {}  # Map future -> episode_id
@@ -382,8 +390,8 @@ class DataCollector:
         )
 
         # Use ProcessPoolExecutor with sliding window to limit memory usage
-        # Only keep 2x num_workers tasks in flight at once
-        max_in_flight = num_workers * 2
+        # Only keep num_workers tasks in flight at once to reduce memory pressure
+        max_in_flight = num_workers
 
         with tqdm(
             total=pbar_total,

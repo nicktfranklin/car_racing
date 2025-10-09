@@ -74,7 +74,7 @@ def main():
     parser.add_argument(
         "--checkpoint-every",
         type=int,
-        default=100,
+        default=50,
         help="Save checkpoint every N episodes during data collection",
     )
     args = parser.parse_args()
