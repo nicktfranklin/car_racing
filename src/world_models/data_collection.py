@@ -5,7 +5,7 @@ Data collection system for World Model training.
 import multiprocessing as mp
 import os
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from typing import Dict, List, Optional, Tuple
 
 import gymnasium as gym
@@ -61,15 +61,17 @@ class RandomAgent:
         return self.action_space.sample()
 
 
-def collect_episodes_worker(args: Tuple[str, Optional[str], int, int, int]) -> List[Episode]:
+def collect_episodes_worker(
+    args: Tuple[str, Optional[str], int, int, int],
+) -> List[Episode]:
     """Worker function for parallel episode collection."""
     env_name, render_mode, num_episodes, max_episode_length, worker_id = args
 
     # Create environment for this worker (None render mode for fastest collection)
     if render_mode is None:
-        env = gym.make(env_name)
+        env = gym.make(env_name, max_episode_steps=max_episode_length)
     else:
-        env = gym.make(env_name, render_mode=render_mode)
+        env = gym.make(env_name, render_mode=render_mode, max_episode_steps=max_episode_length)
     agent = RandomAgent(env.action_space)
     episodes = []
 
@@ -118,64 +120,95 @@ class DataCollector:
     def setup_env(self):
         """Setup the environment."""
         if self.config.render_mode is None:
-            self.env = gym.make(self.config.env_name)
+            self.env = gym.make(
+                self.config.env_name, max_episode_steps=self.config.max_episode_length
+            )
         else:
-            self.env = gym.make(self.config.env_name, render_mode=self.config.render_mode)
+            self.env = gym.make(
+                self.config.env_name,
+                render_mode=self.config.render_mode,
+                max_episode_steps=self.config.max_episode_length,
+            )
         print(f"Environment: {self.config.env_name}")
         print(f"Action space: {self.env.action_space}")
         print(f"Observation space: {self.env.observation_space}")
 
-    def collect_random_episodes(self, num_episodes: int, data_file: str = None, checkpoint_every: int = 100) -> List[Episode]:
+    def collect_random_episodes(
+        self, num_episodes: int, data_file: str = None, checkpoint_every: int = 100
+    ) -> List[Episode]:
         """Collect episodes using random actions with checkpointing support."""
         if data_file is None:
             # No checkpointing, collect all at once
-            return self._collect_episodes_no_checkpoint(num_episodes)
+            return self._collect_episodes_no_checkpoint(num_episodes, existing_count=0)
 
-        # Check existing progress
-        existing_count = self.count_episodes(data_file)
+        # Check existing progress across all files
+        existing_count = self.count_all_episodes(data_file)
         remaining = num_episodes - existing_count
 
         if remaining <= 0:
             print(f"✅ Already have {existing_count} episodes (target: {num_episodes})")
-            return self.load_episodes(data_file)
+            return []
 
         print(f"📊 Progress: {existing_count}/{num_episodes} episodes completed")
         print(f"🔄 Collecting remaining {remaining} episodes...")
 
-        # Collect in chunks with checkpointing
-        all_episodes = []
-        if existing_count > 0:
-            print(f"📁 Loading existing {existing_count} episodes...")
-            all_episodes = self.load_episodes(data_file)
-
+        # Collect in chunks with checkpointing (memory efficient - don't load existing episodes)
         episodes_collected = 0
 
-        while episodes_collected < remaining:
-            # Determine chunk size
-            chunk_size = min(checkpoint_every, remaining - episodes_collected)
+        # Create single progress bar for all chunks
+        with tqdm(total=remaining, desc=f"Collecting episodes ({existing_count} already done)") as pbar:
+            while episodes_collected < remaining:
+                # Determine chunk size
+                chunk_size = min(checkpoint_every, remaining - episodes_collected)
 
-            print(f"\n🎯 Collecting chunk: {chunk_size} episodes ({episodes_collected + existing_count + chunk_size}/{num_episodes} total)")
+                print(
+                    f"\n🎯 Collecting chunk: {chunk_size} episodes ({existing_count + episodes_collected + chunk_size}/{num_episodes} total)"
+                )
 
-            # Collect chunk
-            chunk_episodes = self._collect_episodes_no_checkpoint(chunk_size)
+                # Collect chunk without its own progress bar
+                chunk_episodes = self._collect_episodes_no_checkpoint_for_chunking(
+                    chunk_size, pbar
+                )
 
-            # Save checkpoint
-            if existing_count == 0 and episodes_collected == 0:
-                # First chunk, create new file
-                self.save_episodes(chunk_episodes, data_file)
-            else:
-                # Append to existing file
-                self.append_episodes(chunk_episodes, data_file)
+                # Save the count before clearing the episodes
+                chunk_count = len(chunk_episodes)
 
-            all_episodes.extend(chunk_episodes)
-            episodes_collected += len(chunk_episodes)
+                # Save to separate file (one file per chunk)
+                file_idx = (existing_count + episodes_collected) // checkpoint_every
+                chunk_file = self._get_chunk_filename(data_file, file_idx)
+                self.save_episodes(chunk_episodes, chunk_file)
+                chunk_episodes = None
 
-            print(f"💾 Checkpoint saved: {existing_count + episodes_collected}/{num_episodes} episodes")
+                episodes_collected += chunk_count
 
-        print(f"✅ Data collection completed: {len(all_episodes)} episodes total")
-        return all_episodes
+                print(
+                    f"💾 Checkpoint saved to {chunk_file}: {existing_count + episodes_collected}/{num_episodes} episodes total"
+                )
 
-    def _collect_episodes_no_checkpoint(self, num_episodes: int) -> List[Episode]:
+        print(
+            f"✅ Data collection completed: {existing_count + episodes_collected} episodes total"
+        )
+        # Don't load all episodes into memory - they're already saved to disk
+        return []
+
+    def _collect_episodes_no_checkpoint_for_chunking(
+        self, num_episodes: int, pbar
+    ) -> List[Episode]:
+        """Collect episodes and update the provided progress bar."""
+        # Determine number of workers
+        num_workers = self.config.num_workers
+        if num_workers == -1:
+            num_workers = min(mp.cpu_count(), 16)
+
+        # Use single-threaded for very small collections or when explicitly set to 1
+        if num_episodes < 20 or num_workers == 1:
+            return self._collect_episodes_sequential_with_pbar(num_episodes, pbar)
+        else:
+            return self._collect_episodes_parallel_with_pbar(num_episodes, num_workers, pbar)
+
+    def _collect_episodes_no_checkpoint(
+        self, num_episodes: int, existing_count: int = 0, total_episodes: int = None
+    ) -> List[Episode]:
         """Collect episodes without checkpointing (original method)."""
         # Determine number of workers
         num_workers = self.config.num_workers
@@ -184,12 +217,18 @@ class DataCollector:
 
         # Use single-threaded for very small collections or when explicitly set to 1
         if num_episodes < 20 or num_workers == 1:
-            return self._collect_episodes_sequential(num_episodes)
+            return self._collect_episodes_sequential(
+                num_episodes, existing_count, total_episodes
+            )
         else:
-            return self._collect_episodes_parallel(num_episodes, num_workers)
+            return self._collect_episodes_parallel(
+                num_episodes, num_workers, existing_count, total_episodes
+            )
 
-    def _collect_episodes_sequential(self, num_episodes: int) -> List[Episode]:
-        """Sequential episode collection (original method)."""
+    def _collect_episodes_sequential_with_pbar(
+        self, num_episodes: int, pbar
+    ) -> List[Episode]:
+        """Sequential episode collection with external progress bar."""
         if self.env is None:
             self.setup_env()
 
@@ -197,9 +236,10 @@ class DataCollector:
         episodes = []
 
         print(f"Collecting {num_episodes} random episodes (sequential)...")
-        for i in tqdm(range(num_episodes)):
+        for i in range(num_episodes):
             episode = self._collect_single_episode(agent)
             episodes.append(episode)
+            pbar.update(1)
 
             if (i + 1) % 100 == 0:
                 avg_length = np.mean([len(ep) for ep in episodes[-100:]])
@@ -210,58 +250,191 @@ class DataCollector:
 
         return episodes
 
-    def _collect_episodes_parallel(
-        self, num_episodes: int, num_workers: int
+    def _collect_episodes_sequential(
+        self, num_episodes: int, existing_count: int = 0, total_episodes: int = None
     ) -> List[Episode]:
-        """Parallel episode collection using multiprocessing."""
+        """Sequential episode collection (original method)."""
+        if self.env is None:
+            self.setup_env()
+
+        agent = RandomAgent(self.env.action_space)
+        episodes = []
+
+        # Determine progress bar total: show remaining work, not total
+        pbar_total = (
+            (total_episodes - existing_count) if total_episodes else num_episodes
+        )
+
+        print(f"Collecting {num_episodes} random episodes (sequential)...")
+        with tqdm(
+            total=pbar_total,
+            initial=0,
+            desc=f"Collecting episodes ({existing_count} already done)",
+        ) as pbar:
+            for i in range(num_episodes):
+                episode = self._collect_single_episode(agent)
+                episodes.append(episode)
+                pbar.update(1)
+
+                if (i + 1) % 100 == 0:
+                    avg_length = np.mean([len(ep) for ep in episodes[-100:]])
+                    avg_return = np.mean([sum(ep.rewards) for ep in episodes[-100:]])
+                    print(
+                        f"Episodes {i+1-99}-{i+1}: Avg length = {avg_length:.1f}, Avg return = {avg_return:.2f}"
+                    )
+
+        return episodes
+
+    def _collect_episodes_parallel_with_pbar(
+        self, num_episodes: int, num_workers: int, pbar
+    ) -> List[Episode]:
+        """Parallel episode collection with external progress bar - memory efficient."""
         print(
             f"Collecting {num_episodes} episodes using {num_workers} parallel workers..."
         )
 
-        # Calculate episodes per worker
-        episodes_per_worker = num_episodes // num_workers
-        remaining_episodes = num_episodes % num_workers
+        start_time = time.time()
+        all_episodes = []
 
-        # Create worker arguments
-        worker_args = []
-        for i in range(num_workers):
-            episodes_for_this_worker = episodes_per_worker + (
-                1 if i < remaining_episodes else 0
-            )
-            if episodes_for_this_worker > 0:
+        # Use ProcessPoolExecutor with sliding window to limit memory usage
+        # Only keep 2x num_workers tasks in flight at once
+        max_in_flight = num_workers * 2
+
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = {}  # Map future -> episode_id
+            episode_id = 0
+
+            # Submit initial batch
+            while episode_id < min(max_in_flight, num_episodes):
                 args = (
                     self.config.env_name,
                     self.config.render_mode,
-                    episodes_for_this_worker,
+                    1,  # Collect 1 episode per worker job
                     self.config.max_episode_length,
-                    i,  # worker_id
+                    episode_id,  # worker_id
                 )
-                worker_args.append(args)
+                future = executor.submit(collect_episodes_worker, args)
+                futures[future] = episode_id
+                episode_id += 1
+
+            # Process results and submit new tasks as others complete
+            while futures:
+                # Wait for next task to complete
+                done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
+
+                for future in done:
+                    try:
+                        episodes = future.result()
+                        all_episodes.extend(episodes)
+                        pbar.update(1)
+                    except Exception as exc:
+                        print(f"Worker generated an exception: {exc}")
+
+                    # Remove completed future
+                    del futures[future]
+
+                    # Submit new task if more episodes needed
+                    if episode_id < num_episodes:
+                        args = (
+                            self.config.env_name,
+                            self.config.render_mode,
+                            1,
+                            self.config.max_episode_length,
+                            episode_id,
+                        )
+                        new_future = executor.submit(collect_episodes_worker, args)
+                        futures[new_future] = episode_id
+                        episode_id += 1
+
+        elapsed = time.time() - start_time
+
+        # Print statistics
+        if all_episodes:
+            lengths = [len(ep) for ep in all_episodes]
+            returns = [sum(ep.rewards) for ep in all_episodes]
+            print(f"\n📊 Collection completed in {elapsed:.1f}s:")
+            print(f"  • Episodes: {len(all_episodes)}")
+            print(f"  • Avg length: {np.mean(lengths):.1f} ± {np.std(lengths):.1f}")
+            print(f"  • Avg return: {np.mean(returns):.2f} ± {np.std(returns):.2f}")
+            print(f"  • Total steps: {sum(lengths):,}")
+            print(f"  • Steps/second: {sum(lengths)/elapsed:.0f}")
+
+        return all_episodes
+
+    def _collect_episodes_parallel(
+        self,
+        num_episodes: int,
+        num_workers: int,
+        existing_count: int = 0,
+        total_episodes: int = None,
+    ) -> List[Episode]:
+        """Parallel episode collection using multiprocessing - memory efficient."""
+        print(
+            f"Collecting {num_episodes} episodes using {num_workers} parallel workers..."
+        )
 
         start_time = time.time()
         all_episodes = []
 
-        # Use ProcessPoolExecutor for better control and progress tracking
-        with ProcessPoolExecutor(max_workers=len(worker_args)) as executor:
-            # Submit all jobs
-            future_to_worker = {
-                executor.submit(collect_episodes_worker, args): i
-                for i, args in enumerate(worker_args)
-            }
+        # Determine progress bar total: show remaining work, not total
+        pbar_total = (
+            (total_episodes - existing_count) if total_episodes else num_episodes
+        )
 
-            # Collect results with progress bar
-            with tqdm(total=len(worker_args), desc="Workers completed") as worker_pbar:
-                for future in as_completed(future_to_worker):
-                    worker_id = future_to_worker[future]
-                    try:
-                        episodes = future.result()
-                        all_episodes.extend(episodes)
-                        worker_pbar.set_postfix(
-                            {"Episodes": len(all_episodes), "Worker": worker_id}
-                        )
-                        worker_pbar.update(1)
-                    except Exception as exc:
-                        print(f"Worker {worker_id} generated an exception: {exc}")
+        # Use ProcessPoolExecutor with sliding window to limit memory usage
+        # Only keep 2x num_workers tasks in flight at once
+        max_in_flight = num_workers * 2
+
+        with tqdm(
+            total=pbar_total,
+            initial=0,
+            desc=f"Collecting episodes ({existing_count} already done)",
+        ) as episode_pbar:
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = {}  # Map future -> episode_id
+                episode_id = 0
+
+                # Submit initial batch
+                while episode_id < min(max_in_flight, num_episodes):
+                    args = (
+                        self.config.env_name,
+                        self.config.render_mode,
+                        1,  # Collect 1 episode per worker job
+                        self.config.max_episode_length,
+                        episode_id,  # worker_id
+                    )
+                    future = executor.submit(collect_episodes_worker, args)
+                    futures[future] = episode_id
+                    episode_id += 1
+
+                # Process results and submit new tasks as others complete
+                while futures:
+                    # Wait for next task to complete
+                    done, _ = wait(futures.keys(), return_when=FIRST_COMPLETED)
+
+                    for future in done:
+                        try:
+                            episodes = future.result()
+                            all_episodes.extend(episodes)
+                            episode_pbar.update(1)
+                        except Exception as exc:
+                            print(f"Worker generated an exception: {exc}")
+
+                        # Remove completed future
+                        del futures[future]
+
+                        # Submit new task if more episodes needed
+                        if episode_id < num_episodes:
+                            args = (
+                                self.config.env_name,
+                                self.config.render_mode,
+                                1,
+                                self.config.max_episode_length,
+                                episode_id,
+                            )
+                            new_future = executor.submit(collect_episodes_worker, args)
+                            futures[new_future] = episode_id
+                            episode_id += 1
 
         elapsed = time.time() - start_time
 
@@ -332,30 +505,23 @@ class DataCollector:
 
         print(f"Saved {len(episodes)} episodes to {filepath}")
 
-    def append_episodes(self, episodes: List[Episode], filename: str):
-        """Append episodes to existing file."""
-        os.makedirs(self.config.data_dir, exist_ok=True)
-        filepath = os.path.join(self.config.data_dir, filename)
+    def _get_chunk_filename(self, base_filename: str, chunk_idx: int) -> str:
+        """Generate filename for a chunk."""
+        # Remove extension if present
+        if base_filename.endswith('.h5'):
+            base_filename = base_filename[:-3]
+        return f"{base_filename}_chunk_{chunk_idx:04d}.h5"
 
-        # Get current episode count
-        existing_count = self.count_episodes(filename)
-
-        # Append as HDF5
-        with h5py.File(filepath, "a") as f:
-            for i, episode in enumerate(tqdm(episodes, desc="Appending episodes")):
-                obs, actions, rewards, dones = episode.to_arrays()
-
-                ep_idx = existing_count + i
-                ep_group = f.create_group(f"episode_{ep_idx}")
-                ep_group.create_dataset("observations", data=obs, compression="gzip")
-                ep_group.create_dataset("actions", data=actions)
-                ep_group.create_dataset("rewards", data=rewards)
-                ep_group.create_dataset("dones", data=dones)
-
-        print(f"Appended {len(episodes)} episodes to {filepath}")
+    def _parse_chunk_filename(self, filename: str) -> int:
+        """Extract chunk index from filename. Returns -1 if not a chunk file."""
+        import re
+        match = re.search(r'_chunk_(\d+)\.h5$', filename)
+        if match:
+            return int(match.group(1))
+        return -1
 
     def count_episodes(self, filename: str) -> int:
-        """Count episodes in existing file."""
+        """Count episodes in a single file."""
         filepath = os.path.join(self.config.data_dir, filename)
 
         if not os.path.exists(filepath):
@@ -367,8 +533,59 @@ class DataCollector:
         except Exception:
             return 0
 
-    def load_episodes(self, filename: str) -> List[Episode]:
-        """Load episodes from disk."""
+    def count_all_episodes(self, base_filename: str) -> int:
+        """Count episodes across all chunk files."""
+        import glob
+
+        # Remove extension if present
+        if base_filename.endswith('.h5'):
+            base_filename = base_filename[:-3]
+
+        # Find all chunk files
+        pattern = os.path.join(self.config.data_dir, f"{base_filename}_chunk_*.h5")
+        chunk_files = glob.glob(pattern)
+
+        total = 0
+        for chunk_file in chunk_files:
+            filename = os.path.basename(chunk_file)
+            total += self.count_episodes(filename)
+
+        return total
+
+    def get_chunk_files(self, base_filename: str) -> List[str]:
+        """Get list of all chunk files for a dataset."""
+        import glob
+
+        # Remove extension if present
+        if base_filename.endswith('.h5'):
+            base_filename = base_filename[:-3]
+
+        # Find all chunk files
+        pattern = os.path.join(self.config.data_dir, f"{base_filename}_chunk_*.h5")
+        chunk_files = sorted(glob.glob(pattern))
+
+        return [os.path.basename(f) for f in chunk_files]
+
+    def load_episodes(self, base_filename: str) -> List[Episode]:
+        """Load episodes from disk (supports both single files and chunked files)."""
+        # Check if it's a chunked dataset
+        chunk_files = self.get_chunk_files(base_filename)
+
+        if chunk_files:
+            # Load from multiple chunk files
+            print(f"Found {len(chunk_files)} chunk files")
+            all_episodes = []
+            for chunk_file in chunk_files:
+                episodes = self._load_single_file(chunk_file)
+                all_episodes.extend(episodes)
+            print(f"Loaded {len(all_episodes)} episodes total from {len(chunk_files)} files")
+            return all_episodes
+        else:
+            # Try loading single file (backward compatibility)
+            return self._load_single_file(base_filename)
+
+    def _load_single_file(self, filename: str) -> List[Episode]:
+        """Load episodes from a single file."""
         filepath = os.path.join(self.config.data_dir, filename)
 
         if not os.path.exists(filepath):
@@ -376,7 +593,7 @@ class DataCollector:
 
         episodes = []
         with h5py.File(filepath, "r") as f:
-            for ep_name in tqdm(f.keys(), desc="Loading episodes"):
+            for ep_name in tqdm(f.keys(), desc=f"Loading {filename}", leave=False):
                 ep_group = f[ep_name]
 
                 episode = Episode()
@@ -387,7 +604,6 @@ class DataCollector:
 
                 episodes.append(episode)
 
-        print(f"Loaded {len(episodes)} episodes from {filepath}")
         return episodes
 
     def close(self):
@@ -397,41 +613,92 @@ class DataCollector:
 
 
 class SequenceDataset(torch.utils.data.Dataset):
-    """Dataset for training the world model with sequences."""
+    """Dataset for training the world model with sequences.
+
+    Supports lazy loading from multiple HDF5 files to avoid loading all data into memory.
+    """
 
     def __init__(
         self,
-        episodes: List[Episode],
-        sequence_length: int,
+        episodes: List[Episode] = None,
+        sequence_length: int = 10,
         include_initial_frame: bool = True,
+        data_dir: str = None,
+        chunk_files: List[str] = None,
     ):
-        self.episodes = episodes
+        """
+        Args:
+            episodes: Pre-loaded episodes (legacy mode, loads all into memory)
+            sequence_length: Length of sequences to extract
+            include_initial_frame: Whether to include initial observation
+            data_dir: Directory containing chunk files (for lazy loading)
+            chunk_files: List of chunk filenames to load from (for lazy loading)
+        """
         self.sequence_length = sequence_length
         self.include_initial_frame = include_initial_frame
+        self.data_dir = data_dir
+        self.chunk_files = chunk_files
+        self.lazy_load = (data_dir is not None and chunk_files is not None)
 
-        # Build sequence indices
+        if self.lazy_load:
+            # Lazy loading mode: build index without loading episodes
+            self._build_lazy_index()
+        else:
+            # Legacy mode: keep episodes in memory
+            self.episodes = episodes if episodes is not None else []
+            self._build_memory_index()
+
+    def _build_memory_index(self):
+        """Build sequence indices from episodes in memory."""
         self.sequences = []
-        for ep_idx, episode in enumerate(episodes):
-            max_start = len(episode) - sequence_length
+        for ep_idx, episode in enumerate(self.episodes):
+            max_start = len(episode) - self.sequence_length
             if max_start > 0:
                 for start_idx in range(max_start):
-                    self.sequences.append((ep_idx, start_idx))
+                    self.sequences.append((ep_idx, start_idx, None))
 
         print(
-            f"Created dataset with {len(self.sequences)} sequences from {len(episodes)} episodes"
+            f"Created dataset with {len(self.sequences)} sequences from {len(self.episodes)} episodes"
+        )
+
+    def _build_lazy_index(self):
+        """Build sequence indices by scanning HDF5 files without loading data."""
+        self.sequences = []  # List of (file_idx, ep_idx_in_file, start_idx)
+
+        total_episodes = 0
+        for file_idx, chunk_file in enumerate(self.chunk_files):
+            filepath = os.path.join(self.data_dir, chunk_file)
+            with h5py.File(filepath, "r") as f:
+                ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+                for ep_idx_in_file, ep_name in enumerate(ep_names):
+                    ep_length = len(f[ep_name]["observations"])
+                    max_start = ep_length - self.sequence_length
+                    if max_start > 0:
+                        for start_idx in range(max_start):
+                            self.sequences.append((file_idx, ep_idx_in_file, start_idx))
+                total_episodes += len(ep_names)
+
+        print(
+            f"Created lazy dataset with {len(self.sequences)} sequences from {total_episodes} episodes across {len(self.chunk_files)} files"
         )
 
     def __len__(self) -> int:
         return len(self.sequences)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        ep_idx, start_idx = self.sequences[idx]
+        if self.lazy_load:
+            return self._get_lazy_item(idx)
+        else:
+            return self._get_memory_item(idx)
+
+    def _get_memory_item(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Get item from episodes in memory."""
+        ep_idx, start_idx, _ = self.sequences[idx]
         episode = self.episodes[ep_idx]
 
         # Extract sequence
         end_idx = start_idx + self.sequence_length
         if self.include_initial_frame:
-            # Include initial frame for VAE training
             obs_seq = np.array(episode.observations[start_idx : end_idx + 1])
         else:
             obs_seq = np.array(episode.observations[start_idx + 1 : end_idx + 1])
@@ -450,14 +717,71 @@ class SequenceDataset(torch.utils.data.Dataset):
             "dones": torch.from_numpy(dones_seq).bool(),
         }
 
+    def _get_lazy_item(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Get item by lazy loading from HDF5 file."""
+        file_idx, ep_idx_in_file, start_idx = self.sequences[idx]
+
+        # Load from HDF5 file
+        filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+        with h5py.File(filepath, "r") as f:
+            ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+            ep_name = ep_names[ep_idx_in_file]
+            ep_group = f[ep_name]
+
+            # Extract sequence
+            end_idx = start_idx + self.sequence_length
+            if self.include_initial_frame:
+                obs_seq = ep_group["observations"][start_idx : end_idx + 1]
+            else:
+                obs_seq = ep_group["observations"][start_idx + 1 : end_idx + 1]
+
+            actions_seq = ep_group["actions"][start_idx:end_idx]
+            rewards_seq = ep_group["rewards"][start_idx:end_idx]
+            dones_seq = ep_group["dones"][start_idx:end_idx]
+
+            # Convert to tensors
+            return {
+                "observations": torch.from_numpy(np.array(obs_seq))
+                .float()
+                .permute(0, 3, 1, 2),  # (T, C, H, W)
+                "actions": torch.from_numpy(np.array(actions_seq)).float(),
+                "rewards": torch.from_numpy(np.array(rewards_seq)).float(),
+                "dones": torch.from_numpy(np.array(dones_seq)).bool(),
+            }
+
 
 class ImageDataset(torch.utils.data.Dataset):
-    """Dataset for training VAE with individual images."""
+    """Dataset for training VAE with individual images.
 
-    def __init__(self, episodes: List[Episode]):
+    Supports lazy loading from multiple HDF5 files to avoid loading all data into memory.
+    """
+
+    def __init__(
+        self,
+        episodes: List[Episode] = None,
+        data_dir: str = None,
+        chunk_files: List[str] = None,
+    ):
+        """
+        Args:
+            episodes: Pre-loaded episodes (legacy mode, loads all into memory)
+            data_dir: Directory containing chunk files (for lazy loading)
+            chunk_files: List of chunk filenames to load from (for lazy loading)
+        """
+        self.data_dir = data_dir
+        self.chunk_files = chunk_files
+        self.lazy_load = (data_dir is not None and chunk_files is not None)
+
+        if self.lazy_load:
+            # Lazy loading mode: build index without loading images
+            self._build_lazy_index()
+        else:
+            # Legacy mode: load all images into memory
+            self._build_memory_dataset(episodes if episodes is not None else [])
+
+    def _build_memory_dataset(self, episodes: List[Episode]):
+        """Build dataset from episodes in memory."""
         self.images = []
-
-        # Collect all images
         for episode in episodes:
             for obs in episode.observations:
                 self.images.append(obs)
@@ -465,13 +789,55 @@ class ImageDataset(torch.utils.data.Dataset):
         self.images = np.array(self.images)
         print(f"Created image dataset with {len(self.images)} images")
 
+    def _build_lazy_index(self):
+        """Build image index by scanning HDF5 files without loading data."""
+        self.image_indices = []  # List of (file_idx, ep_idx_in_file, frame_idx)
+
+        total_images = 0
+        for file_idx, chunk_file in enumerate(self.chunk_files):
+            filepath = os.path.join(self.data_dir, chunk_file)
+            with h5py.File(filepath, "r") as f:
+                ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+                for ep_idx_in_file, ep_name in enumerate(ep_names):
+                    num_frames = len(f[ep_name]["observations"])
+                    for frame_idx in range(num_frames):
+                        self.image_indices.append((file_idx, ep_idx_in_file, frame_idx))
+                    total_images += num_frames
+
+        print(
+            f"Created lazy image dataset with {total_images} images across {len(self.chunk_files)} files"
+        )
+
     def __len__(self) -> int:
-        return len(self.images)
+        if self.lazy_load:
+            return len(self.image_indices)
+        else:
+            return len(self.images)
 
     def __getitem__(self, idx: int) -> torch.Tensor:
+        if self.lazy_load:
+            return self._get_lazy_item(idx)
+        else:
+            return self._get_memory_item(idx)
+
+    def _get_memory_item(self, idx: int) -> torch.Tensor:
+        """Get item from images in memory."""
         img = self.images[idx]
-        # Convert to tensor and permute to (C, H, W)
         return torch.from_numpy(img).float().permute(2, 0, 1)
+
+    def _get_lazy_item(self, idx: int) -> torch.Tensor:
+        """Get item by lazy loading from HDF5 file."""
+        file_idx, ep_idx_in_file, frame_idx = self.image_indices[idx]
+
+        # Load from HDF5 file
+        filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+        with h5py.File(filepath, "r") as f:
+            ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+            ep_name = ep_names[ep_idx_in_file]
+            img = f[ep_name]["observations"][frame_idx]
+
+            # Convert to tensor and permute to (C, H, W)
+            return torch.from_numpy(np.array(img)).float().permute(2, 0, 1)
 
 
 def test_parallel_performance():

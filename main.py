@@ -23,7 +23,9 @@ from world_models import (
 
 def main():
     parser = argparse.ArgumentParser(description="Train World Model Agent")
-    parser.add_argument("--config", type=str, default=None, help="Path to config file")
+    parser.add_argument(
+        "--config", type=str, default="config.yaml", help="Path to config file"
+    )
     parser.add_argument(
         "--stage",
         type=str,
@@ -38,12 +40,12 @@ def main():
         "--resume", action="store_true", help="Resume training from checkpoint"
     )
     parser.add_argument(
-        "--device", type=str, default="auto", help="Device to use (cpu/cuda/auto)"
+        "--device", type=str, default=None, help="Device to use (cpu/cuda/mps/auto)"
     )
     parser.add_argument(
         "--workers",
         type=int,
-        default=1,
+        default=None,
         help="Number of parallel workers for data collection (-1 for auto)",
     )
     parser.add_argument(
@@ -78,22 +80,30 @@ def main():
     args = parser.parse_args()
 
     # Load configuration
+    print(f"Loading config from: {args.config}")
     if args.config:
         config = WorldModelAgentConfig.from_yaml(args.config)
+        print(
+            f"Config loaded from YAML: max_episode_length={config.data.max_episode_length}, num_workers={config.data.num_workers}"
+        )
     else:
         config = WorldModelAgentConfig()
+        print(f"Using default config")
 
     # Set device
-    if args.device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    if args.device is not None:
+        if args.device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        else:
+            device = args.device
+        config.training.device = device
     else:
-        device = args.device
-    config.training.device = device
-
-    # Set parallel workers
-    config.data.num_workers = args.workers
+        # Use device from config
+        device = config.training.device
 
     # Override rollout settings if provided
+    if args.workers is not None:
+        config.data.num_workers = args.workers
     if args.num_rollouts is not None:
         config.data.num_rollouts = args.num_rollouts
     if args.max_episode_length is not None:
@@ -117,6 +127,8 @@ def main():
     print(f"Starting World Model training pipeline...")
     print(f"Device: {device}")
     print(f"Stage: {args.stage}")
+    print(f"Max episode length: {config.data.max_episode_length}")
+    print(f"Num workers: {config.data.num_workers}")
 
     if args.stage in ["collect", "all"]:
         print("\n" + "=" * 50)
@@ -145,15 +157,15 @@ def main():
     print("\nTraining pipeline completed!")
 
 
-def collect_data(config: WorldModelAgentConfig, data_file: str, checkpoint_every: int = 100):
+def collect_data(
+    config: WorldModelAgentConfig, data_file: str, checkpoint_every: int = 100
+):
     """Collect training data with checkpointing."""
     collector = DataCollector(config.data)
 
     print(f"Collecting {config.data.num_rollouts} episodes with checkpointing...")
-    episodes = collector.collect_random_episodes(
-        config.data.num_rollouts,
-        data_file=data_file,
-        checkpoint_every=checkpoint_every
+    collector.collect_random_episodes(
+        config.data.num_rollouts, data_file=data_file, checkpoint_every=checkpoint_every
     )
 
     collector.close()
@@ -162,10 +174,17 @@ def collect_data(config: WorldModelAgentConfig, data_file: str, checkpoint_every
 
 def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = False):
     """Train the FSQ-VAE."""
-    # Load data
+    # Create dataset with lazy loading (don't load all episodes into memory)
     collector = DataCollector(config.data)
-    episodes = collector.load_episodes(data_file)
-    dataset = ImageDataset(episodes)
+    chunk_files = collector.get_chunk_files(data_file)
+
+    if chunk_files:
+        # Use lazy loading for chunked data
+        dataset = ImageDataset(data_dir=config.data.data_dir, chunk_files=chunk_files)
+    else:
+        # Fallback to loading episodes for backward compatibility
+        episodes = collector.load_episodes(data_file)
+        dataset = ImageDataset(episodes=episodes)
 
     # Create model and trainer
     vae = FSQVAE(config.fsq_vae)
@@ -193,10 +212,21 @@ def train_world_model(
     config: WorldModelAgentConfig, data_file: str, resume: bool = False
 ):
     """Train the world model."""
-    # Load data
+    # Create dataset with lazy loading (don't load all episodes into memory)
     collector = DataCollector(config.data)
-    episodes = collector.load_episodes(data_file)
-    dataset = SequenceDataset(episodes, config.world_model.sequence_length)
+    chunk_files = collector.get_chunk_files(data_file)
+
+    if chunk_files:
+        # Use lazy loading for chunked data
+        dataset = SequenceDataset(
+            sequence_length=config.world_model.sequence_length,
+            data_dir=config.data.data_dir,
+            chunk_files=chunk_files,
+        )
+    else:
+        # Fallback to loading episodes for backward compatibility
+        episodes = collector.load_episodes(data_file)
+        dataset = SequenceDataset(episodes, config.world_model.sequence_length)
 
     # Load trained VAE
     vae = FSQVAE(config.fsq_vae)
@@ -325,9 +355,15 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
     # Create environment
     env = gym.make(config.data.env_name, render_mode="human")
 
-    device = torch.device(
-        config.training.device if torch.cuda.is_available() else "cpu"
-    )
+    # Use configured device, validate it's available
+    device_str = config.training.device
+    if device_str == "cuda" and not torch.cuda.is_available():
+        print("Warning: CUDA requested but not available, falling back to CPU")
+        device_str = "cpu"
+    elif device_str == "mps" and not torch.backends.mps.is_available():
+        print("Warning: MPS requested but not available, falling back to CPU")
+        device_str = "cpu"
+    device = torch.device(device_str)
     vae.to(device).eval()
     controller.to(device).eval()
 
@@ -340,6 +376,7 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
         for step in range(config.data.max_episode_length):
             # Preprocess observation (resize from 96x96 to 64x64)
             from skimage.transform import resize
+
             obs_resized = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True)
             obs_tensor = (
                 torch.from_numpy(obs_resized.astype(np.float32) / 255.0)

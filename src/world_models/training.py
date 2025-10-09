@@ -25,9 +25,16 @@ class VAETrainer:
     def __init__(self, model: FSQVAE, config: WorldModelAgentConfig):
         self.model = model
         self.config = config
-        self.device = torch.device(
-            config.training.device if torch.cuda.is_available() else "cpu"
-        )
+        # Use configured device, validate it's available
+        device_str = config.training.device
+        if device_str == "cuda" and not torch.cuda.is_available():
+            print("Warning: CUDA requested but not available, falling back to CPU")
+            device_str = "cpu"
+        elif device_str == "mps" and not torch.backends.mps.is_available():
+            print("Warning: MPS requested but not available, falling back to CPU")
+            device_str = "cpu"
+        self.device = torch.device(device_str)
+        print(f"VAETrainer using device: {self.device}")
 
         self.model.to(self.device)
         self.optimizer = optim.Adam(
@@ -119,9 +126,16 @@ class WorldModelTrainer:
         self.world_model = world_model
         self.vae = vae
         self.config = config
-        self.device = torch.device(
-            config.training.device if torch.cuda.is_available() else "cpu"
-        )
+        # Use configured device, validate it's available
+        device_str = config.training.device
+        if device_str == "cuda" and not torch.cuda.is_available():
+            print("Warning: CUDA requested but not available, falling back to CPU")
+            device_str = "cpu"
+        elif device_str == "mps" and not torch.backends.mps.is_available():
+            print("Warning: MPS requested but not available, falling back to CPU")
+            device_str = "cpu"
+        self.device = torch.device(device_str)
+        print(f"WorldModelTrainer using device: {self.device}")
 
         self.world_model.to(self.device)
         self.vae.to(self.device)
@@ -258,9 +272,16 @@ class ControllerTrainer:
         self.vae = vae
         self.world_model = world_model
         self.config = config
-        self.device = torch.device(
-            config.training.device if torch.cuda.is_available() else "cpu"
-        )
+        # Use configured device, validate it's available
+        device_str = config.training.device
+        if device_str == "cuda" and not torch.cuda.is_available():
+            print("Warning: CUDA requested but not available, falling back to CPU")
+            device_str = "cpu"
+        elif device_str == "mps" and not torch.backends.mps.is_available():
+            print("Warning: MPS requested but not available, falling back to CPU")
+            device_str = "cpu"
+        self.device = torch.device(device_str)
+        print(f"ControllerTrainer using device: {self.device}")
 
         # Move models to device and set to eval mode
         self.vae.to(self.device).eval()

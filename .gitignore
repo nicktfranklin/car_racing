@@ -201,3 +201,4 @@ wandb/
 *.swo
 
 .claude
+data/
