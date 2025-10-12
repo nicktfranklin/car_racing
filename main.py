@@ -18,6 +18,9 @@ from world_models import (
     WorldModel,
     WorldModelAgentConfig,
     WorldModelTrainer,
+    VAELightningModule,
+    WorldModelLightningModule,
+    create_train_val_dataloaders,
 )
 
 
@@ -173,38 +176,92 @@ def collect_data(
 
 
 def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = False):
-    """Train the FSQ-VAE."""
+    """Train the FSQ-VAE using PyTorch Lightning."""
+    import lightning as L
+    from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+
     # Create dataset with lazy loading (don't load all episodes into memory)
     collector = DataCollector(config.data)
     chunk_files = collector.get_chunk_files(data_file)
 
     if chunk_files:
-        # Use lazy loading for chunked data
-        dataset = ImageDataset(data_dir=config.data.data_dir, chunk_files=chunk_files)
+        # Use lazy loading for chunked data with subsampling
+        dataset = ImageDataset(
+            data_dir=config.data.data_dir,
+            chunk_files=chunk_files,
+            subsample_rate=config.training.subsample_rate,
+        )
     else:
         # Fallback to loading episodes for backward compatibility
         episodes = collector.load_episodes(data_file)
         dataset = ImageDataset(episodes=episodes)
 
-    # Create model and trainer
-    vae = FSQVAE(config.fsq_vae)
-    trainer = VAETrainer(vae, config)
+    # Create train/val dataloaders with random sampling
+    pin_memory = config.training.device == "cuda"
 
-    # Resume from checkpoint if requested
-    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
-    if resume and os.path.exists(vae_checkpoint_path):
-        print(f"Resuming VAE training from {vae_checkpoint_path}")
-        trainer.load_checkpoint(vae_checkpoint_path)
+    train_loader, val_loader = create_train_val_dataloaders(
+        dataset=dataset,
+        batch_size=config.training.batch_size,
+        num_workers=config.training.num_dataloader_workers,
+        val_split=config.training.val_split,
+        train_samples_per_epoch=config.training.steps_per_epoch,
+        val_samples=config.training.val_samples,
+        pin_memory=pin_memory,
+    )
+
+    # Create model and Lightning module
+    vae = FSQVAE(config.fsq_vae)
+    lightning_module = VAELightningModule(vae, config)
+
+    # Setup callbacks
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=config.training.checkpoint_dir,
+        filename="vae-{epoch:02d}-{val/loss:.4f}",
+        monitor="val/loss",
+        mode="min",
+        save_top_k=3,
+        save_last=True,
+    )
+
+    early_stopping = EarlyStopping(
+        monitor="val/loss",
+        patience=config.training.early_stopping_patience,
+        mode="min",
+        verbose=True,
+    )
+
+    # Create trainer
+    trainer = L.Trainer(
+        max_epochs=config.training.train_vae_epochs,
+        callbacks=[checkpoint_callback, early_stopping],
+        accelerator="auto",
+        devices=1,
+        log_every_n_steps=config.training.log_every,
+        val_check_interval=1.0,  # Validate every epoch
+        enable_progress_bar=True,
+        default_root_dir=config.training.checkpoint_dir,
+    )
 
     # Train
-    print(f"Training VAE for {config.training.train_vae_epochs} epochs...")
-    history = trainer.train(dataset, config.training.train_vae_epochs)
+    print(f"Training VAE with Lightning (max {config.training.train_vae_epochs} epochs)...")
+    print(f"  - {config.training.steps_per_epoch} batches per epoch")
+    print(f"  - Subsample rate: 1/{config.training.subsample_rate}")
+    print(f"  - Validation split: {config.training.val_split*100:.1f}%")
+    print(f"  - Early stopping patience: {config.training.early_stopping_patience} epochs")
+    print(f"  - Checkpointing best models based on validation loss")
 
-    # Save checkpoint
-    print(f"Saving VAE checkpoint to {vae_checkpoint_path}")
-    trainer.save_checkpoint(vae_checkpoint_path)
+    ckpt_path = None
+    if resume:
+        last_ckpt = os.path.join(config.training.checkpoint_dir, "last.ckpt")
+        if os.path.exists(last_ckpt):
+            ckpt_path = last_ckpt
+            print(f"Resuming from {ckpt_path}")
+
+    trainer.fit(lightning_module, train_loader, val_loader, ckpt_path=ckpt_path)
 
     print("VAE training completed!")
+    print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+
     return vae
 
 
@@ -358,11 +415,9 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
     # Use configured device, validate it's available
     device_str = config.training.device
     if device_str == "cuda" and not torch.cuda.is_available():
-        print("Warning: CUDA requested but not available, falling back to CPU")
-        device_str = "cpu"
+        raise RuntimeError("CUDA device requested but CUDA is not available on this system")
     elif device_str == "mps" and not torch.backends.mps.is_available():
-        print("Warning: MPS requested but not available, falling back to CPU")
-        device_str = "cpu"
+        raise RuntimeError("MPS device requested but MPS is not available on this system")
     device = torch.device(device_str)
     vae.to(device).eval()
     controller.to(device).eval()

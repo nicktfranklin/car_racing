@@ -33,7 +33,7 @@ data:
   render_mode: null
   num_rollouts: 10000 
   max_episode_length: 2000  
-  num_workers: 1
+  num_workers: 4
   batch_size: 100
   frame_skip: 4
   frame_stack: 1
@@ -41,11 +41,20 @@ data:
 
 training:
   device: mps
-  batch_size: 32
+  batch_size: 128
   num_epochs: 100
-  train_vae_epochs: 50
+  train_vae_epochs: 100
   train_world_model_epochs: 50
   train_controller_epochs: 100
+
+  # Lightning training parameters
+  steps_per_epoch: 1000  # Number of batches per training epoch
+  val_samples: 500  # Number of validation samples to use
+  val_split: 0.05  # 5% of data for validation
+  early_stopping_patience: 10  # Stop if no improvement for N epochs
+  num_dataloader_workers: 4  # Parallel data loading workers
+  subsample_rate: 4  # Use every Nth frame (4 = 25% of frames)
+
   eval_every: 10
   save_every: 25
   log_every: 100

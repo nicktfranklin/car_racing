@@ -153,6 +153,26 @@ class TrainingConfig(BaseModel):
         default=100, description="Controller training epochs"
     )
 
+    # Lightning-specific training parameters
+    steps_per_epoch: int = Field(
+        default=1000, description="Number of batches per epoch (for random sampling)"
+    )
+    val_samples: int = Field(
+        default=500, description="Number of validation samples"
+    )
+    val_split: float = Field(
+        default=0.05, description="Fraction of data to use for validation"
+    )
+    early_stopping_patience: int = Field(
+        default=10, description="Early stopping patience in epochs"
+    )
+    num_dataloader_workers: int = Field(
+        default=4, description="Number of dataloader workers"
+    )
+    subsample_rate: int = Field(
+        default=4, description="Subsample rate for image dataset (use every Nth frame)"
+    )
+
     # Evaluation
     eval_every: int = Field(default=10, description="Evaluate every N epochs")
     save_every: int = Field(default=25, description="Save checkpoint every N epochs")

@@ -12,6 +12,11 @@ from .config import WorldModelAgentConfig
 from .data_collection import DataCollector, ImageDataset, SequenceDataset
 from .models import FSQVAE, Controller, EvolutionaryController, WorldModel
 from .training import ControllerTrainer, VAETrainer, WorldModelTrainer
+from .lightning_training import (
+    VAELightningModule,
+    WorldModelLightningModule,
+    create_train_val_dataloaders,
+)
 
 __all__ = [
     "Agent",
@@ -30,4 +35,7 @@ __all__ = [
     "VAETrainer",
     "WorldModelTrainer",
     "ControllerTrainer",
+    "VAELightningModule",
+    "WorldModelLightningModule",
+    "create_train_val_dataloaders",
 ]

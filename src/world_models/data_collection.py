@@ -769,16 +769,19 @@ class ImageDataset(torch.utils.data.Dataset):
         episodes: List[Episode] = None,
         data_dir: str = None,
         chunk_files: List[str] = None,
+        subsample_rate: int = 1,
     ):
         """
         Args:
             episodes: Pre-loaded episodes (legacy mode, loads all into memory)
             data_dir: Directory containing chunk files (for lazy loading)
             chunk_files: List of chunk filenames to load from (for lazy loading)
+            subsample_rate: Only use every Nth image (default 1 = use all)
         """
         self.data_dir = data_dir
         self.chunk_files = chunk_files
         self.lazy_load = (data_dir is not None and chunk_files is not None)
+        self.subsample_rate = subsample_rate
 
         if self.lazy_load:
             # Lazy loading mode: build index without loading images
@@ -802,19 +805,26 @@ class ImageDataset(torch.utils.data.Dataset):
         self.image_indices = []  # List of (file_idx, ep_idx_in_file, frame_idx)
 
         total_images = 0
+        subsampled_images = 0
         for file_idx, chunk_file in enumerate(self.chunk_files):
             filepath = os.path.join(self.data_dir, chunk_file)
             with h5py.File(filepath, "r") as f:
                 ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
                 for ep_idx_in_file, ep_name in enumerate(ep_names):
                     num_frames = len(f[ep_name]["observations"])
-                    for frame_idx in range(num_frames):
+                    for frame_idx in range(0, num_frames, self.subsample_rate):
                         self.image_indices.append((file_idx, ep_idx_in_file, frame_idx))
+                        subsampled_images += 1
                     total_images += num_frames
 
-        print(
-            f"Created lazy image dataset with {total_images} images across {len(self.chunk_files)} files"
-        )
+        if self.subsample_rate > 1:
+            print(
+                f"Created lazy image dataset with {subsampled_images} images (subsampled from {total_images} at rate 1/{self.subsample_rate}) across {len(self.chunk_files)} files"
+            )
+        else:
+            print(
+                f"Created lazy image dataset with {total_images} images across {len(self.chunk_files)} files"
+            )
 
     def __len__(self) -> int:
         if self.lazy_load:
@@ -834,12 +844,16 @@ class ImageDataset(torch.utils.data.Dataset):
         return torch.from_numpy(img).float().permute(2, 0, 1)
 
     def _get_lazy_item(self, idx: int) -> torch.Tensor:
-        """Get item by lazy loading from HDF5 file."""
+        """Get item by lazy loading from HDF5 file.
+
+        Note: This method opens HDF5 files on each access. For better performance,
+        consider using persistent file handles, but be aware of multiprocessing limitations.
+        """
         file_idx, ep_idx_in_file, frame_idx = self.image_indices[idx]
 
-        # Load from HDF5 file
+        # Load from HDF5 file (opening on each access for thread-safety with DataLoader workers)
         filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-        with h5py.File(filepath, "r") as f:
+        with h5py.File(filepath, "r", rdcc_nbytes=1024**3, rdcc_nslots=10000) as f:
             ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
             ep_name = ep_names[ep_idx_in_file]
             img = f[ep_name]["observations"][frame_idx]
