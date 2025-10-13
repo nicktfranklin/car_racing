@@ -21,6 +21,7 @@ from world_models import (
     VAELightningModule,
     WorldModelLightningModule,
     create_train_val_dataloaders,
+    create_sequence_train_val_dataloaders,
 )
 
 
@@ -268,7 +269,14 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
 def train_world_model(
     config: WorldModelAgentConfig, data_file: str, resume: bool = False
 ):
-    """Train the world model."""
+    """Train the world model using Lightning."""
+    print("\n" + "=" * 50)
+    print("STAGE 2: WORLD MODEL TRAINING")
+    print("=" * 50)
+
+    import lightning as L
+    from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+
     # Create dataset with lazy loading (don't load all episodes into memory)
     collector = DataCollector(config.data)
     chunk_files = collector.get_chunk_files(data_file)
@@ -285,39 +293,96 @@ def train_world_model(
         episodes = collector.load_episodes(data_file)
         dataset = SequenceDataset(episodes, config.world_model.sequence_length)
 
+    # Create train/val dataloaders
+    pin_memory = config.training.device == "cuda"
+
+    train_loader, val_loader = create_sequence_train_val_dataloaders(
+        dataset=dataset,
+        batch_size=config.training.batch_size,
+        num_workers=config.training.num_dataloader_workers,
+        val_split=config.training.val_split,
+        train_samples_per_epoch=config.training.world_model_steps_per_epoch,
+        val_samples=config.training.world_model_val_samples,
+        pin_memory=pin_memory,
+    )
+
     # Load trained VAE
     vae = FSQVAE(config.fsq_vae)
-    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
-    if os.path.exists(vae_checkpoint_path):
+
+    # Try loading from Lightning checkpoint first
+    vae_lightning_checkpoint = os.path.join(config.training.checkpoint_dir, "vae-last.ckpt")
+    vae_legacy_checkpoint = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
+
+    if os.path.exists(vae_lightning_checkpoint):
+        print(f"Loading VAE from Lightning checkpoint: {vae_lightning_checkpoint}")
+        vae_module = VAELightningModule.load_from_checkpoint(
+            vae_lightning_checkpoint, model=vae, config=config
+        )
+        vae = vae_module.model
+        print("Loaded trained VAE from Lightning checkpoint")
+    elif os.path.exists(vae_legacy_checkpoint):
+        print(f"Loading VAE from legacy checkpoint: {vae_legacy_checkpoint}")
         vae_trainer = VAETrainer(vae, config)
-        vae_trainer.load_checkpoint(vae_checkpoint_path)
-        print("Loaded trained VAE")
+        vae_trainer.load_checkpoint(vae_legacy_checkpoint)
+        print("Loaded trained VAE from legacy checkpoint")
     else:
         print("Warning: No trained VAE found. Training world model with random VAE.")
 
-    # Create world model and trainer
+    # Create world model and Lightning module
     world_model = WorldModel(config.world_model)
-    trainer = WorldModelTrainer(world_model, vae, config)
+    lightning_module = WorldModelLightningModule(world_model, vae, config)
 
-    # Resume from checkpoint if requested
-    wm_checkpoint_path = os.path.join(
-        config.training.checkpoint_dir, "world_model_latest.pth"
+    # Setup callbacks
+    checkpoint_callback = ModelCheckpoint(
+        dirpath=config.training.checkpoint_dir,
+        filename="world_model-{epoch:02d}-{val/loss:.4f}",
+        monitor="val/loss",
+        mode="min",
+        save_top_k=3,
+        save_last=True,
     )
-    if resume and os.path.exists(wm_checkpoint_path):
-        print(f"Resuming world model training from {wm_checkpoint_path}")
-        trainer.load_checkpoint(wm_checkpoint_path)
+
+    early_stopping = EarlyStopping(
+        monitor="val/loss",
+        patience=config.training.early_stopping_patience,
+        mode="min",
+    )
+
+    # Create trainer
+    trainer = L.Trainer(
+        max_epochs=config.training.train_world_model_epochs,
+        accelerator="auto",
+        devices=1,
+        callbacks=[checkpoint_callback, early_stopping],
+        limit_train_batches=config.training.world_model_steps_per_epoch,
+        val_check_interval=1.0,
+        log_every_n_steps=50,
+        enable_progress_bar=True,
+    )
+
+    # Determine checkpoint path for resuming
+    ckpt_path = None
+    if resume:
+        last_ckpt = os.path.join(config.training.checkpoint_dir, "world_model-last.ckpt")
+        if os.path.exists(last_ckpt):
+            ckpt_path = last_ckpt
+            print(f"Resuming world model training from {ckpt_path}")
 
     # Train
-    print(
-        f"Training world model for {config.training.train_world_model_epochs} epochs..."
-    )
-    history = trainer.train(dataset, config.training.train_world_model_epochs)
+    print("Training World Model with Lightning (max {} epochs)...".format(
+        config.training.train_world_model_epochs
+    ))
+    print(f"  - {config.training.world_model_steps_per_epoch} batches per epoch")
+    print(f"  - Sequence length: {config.world_model.sequence_length}")
+    print(f"  - Validation split: {config.training.val_split*100:.1f}%")
+    print(f"  - Early stopping patience: {config.training.early_stopping_patience} epochs")
+    print(f"  - Checkpointing best models based on validation loss")
 
-    # Save checkpoint
-    print(f"Saving world model checkpoint to {wm_checkpoint_path}")
-    trainer.save_checkpoint(wm_checkpoint_path)
+    trainer.fit(lightning_module, train_loader, val_loader, ckpt_path=ckpt_path)
 
-    print("World model training completed!")
+    print("\nWorld model training completed!")
+    print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+
     return world_model
 
 

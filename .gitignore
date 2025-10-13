@@ -202,3 +202,4 @@ wandb/
 
 .claude
 data/
+lightning_logs/

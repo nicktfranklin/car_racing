@@ -9,6 +9,55 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class OptimizerConfig(BaseModel):
+    """Configuration for optimizer and learning rate scheduling."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Optimizer type
+    optimizer: str = Field(
+        default="adam", description="Optimizer type (adam, adamw, sgd)"
+    )
+
+    # Learning rate
+    learning_rate: float = Field(default=1e-3, description="Initial learning rate")
+
+    # Adam/AdamW parameters
+    beta1: float = Field(default=0.9, description="Adam beta1 parameter")
+    beta2: float = Field(default=0.999, description="Adam beta2 parameter")
+    epsilon: float = Field(default=1e-8, description="Adam epsilon parameter")
+    weight_decay: float = Field(default=0.0, description="Weight decay (L2 regularization)")
+    amsgrad: bool = Field(default=False, description="Whether to use AMSGrad variant of Adam")
+
+    # SGD parameters
+    momentum: float = Field(default=0.9, description="SGD momentum")
+    nesterov: bool = Field(default=False, description="Whether to use Nesterov momentum")
+
+    # Learning rate scheduler
+    use_scheduler: bool = Field(default=False, description="Whether to use LR scheduler")
+    scheduler: str = Field(
+        default="cosine",
+        description="LR scheduler type (cosine, step, exponential, reduce_on_plateau)",
+    )
+
+    # Scheduler parameters
+    warmup_epochs: int = Field(default=0, description="Number of warmup epochs")
+    min_lr: float = Field(default=1e-6, description="Minimum learning rate for schedulers")
+
+    # Step scheduler
+    step_size: int = Field(default=30, description="Step size for StepLR")
+    gamma: float = Field(default=0.1, description="Multiplicative factor for StepLR/ExponentialLR")
+
+    # ReduceLROnPlateau
+    patience: int = Field(default=10, description="Patience for ReduceLROnPlateau")
+    factor: float = Field(default=0.5, description="Factor for ReduceLROnPlateau")
+
+    # Gradient clipping
+    grad_clip_norm: Optional[float] = Field(
+        default=None, description="Max norm for gradient clipping (None = no clipping)"
+    )
+
+
 class FSQVAEConfig(BaseModel):
     """Configuration for Finite Scalar Quantization VAE."""
 
@@ -45,8 +94,11 @@ class FSQVAEConfig(BaseModel):
     )
 
     # Training parameters
-    learning_rate: float = Field(default=1e-3, description="Learning rate")
-    beta: float = Field(default=1.0, description="KL divergence weight")
+    learning_rate: float = Field(default=1e-3, description="Learning rate (deprecated, use optimizer config)")
+    beta: float = Field(default=1.0, description="Commitment loss weight")
+
+    # Optimizer configuration
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
 
 
 class WorldModelConfig(BaseModel):
@@ -71,8 +123,11 @@ class WorldModelConfig(BaseModel):
     )
 
     # Training parameters
-    learning_rate: float = Field(default=1e-3, description="Learning rate")
+    learning_rate: float = Field(default=1e-3, description="Learning rate (deprecated, use optimizer config)")
     sequence_length: int = Field(default=50, description="Training sequence length")
+
+    # Optimizer configuration
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
 
 
 class ControllerConfig(BaseModel):
@@ -93,7 +148,10 @@ class ControllerConfig(BaseModel):
     action_dim: int = Field(default=3, description="Action dimension")
 
     # Training parameters
-    learning_rate: float = Field(default=1e-3, description="Learning rate")
+    learning_rate: float = Field(default=1e-3, description="Learning rate (deprecated, use optimizer config)")
+
+    # Optimizer configuration
+    optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
 
 
 class DataConfig(BaseModel):
@@ -171,6 +229,14 @@ class TrainingConfig(BaseModel):
     )
     subsample_rate: int = Field(
         default=4, description="Subsample rate for image dataset (use every Nth frame)"
+    )
+
+    # World Model specific parameters
+    world_model_steps_per_epoch: int = Field(
+        default=1000, description="Number of batches per epoch for world model training"
+    )
+    world_model_val_samples: int = Field(
+        default=500, description="Number of validation samples for world model"
     )
 
     # Evaluation

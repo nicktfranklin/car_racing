@@ -16,6 +16,7 @@ from .lightning_training import (
     VAELightningModule,
     WorldModelLightningModule,
     create_train_val_dataloaders,
+    create_sequence_train_val_dataloaders,
 )
 
 __all__ = [
@@ -38,4 +39,5 @@ __all__ = [
     "VAELightningModule",
     "WorldModelLightningModule",
     "create_train_val_dataloaders",
+    "create_sequence_train_val_dataloaders",
 ]

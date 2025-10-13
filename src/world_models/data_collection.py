@@ -648,6 +648,9 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.chunk_files = chunk_files
         self.lazy_load = (data_dir is not None and chunk_files is not None)
 
+        # Cache for HDF5 file handles (process-local for DataLoader workers)
+        self._file_handles = {}
+
         if self.lazy_load:
             # Lazy loading mode: build index without loading episodes
             self._build_lazy_index()
@@ -725,37 +728,65 @@ class SequenceDataset(torch.utils.data.Dataset):
             "dones": torch.from_numpy(dones_seq).bool(),
         }
 
+    def _get_file_handle(self, file_idx: int) -> h5py.File:
+        """Get cached file handle for the given file index.
+
+        Uses process-level caching to avoid reopening files repeatedly.
+        Each worker process maintains its own cache.
+        """
+        import os
+        pid = os.getpid()  # Get current process ID for worker isolation
+        cache_key = (pid, file_idx)
+
+        if cache_key not in self._file_handles:
+            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+            # Open with large cache for better performance
+            self._file_handles[cache_key] = h5py.File(
+                filepath, "r",
+                rdcc_nbytes=512*1024*1024,  # 512MB cache per file
+                rdcc_nslots=20000
+            )
+
+        return self._file_handles[cache_key]
+
     def _get_lazy_item(self, idx: int) -> Dict[str, torch.Tensor]:
-        """Get item by lazy loading from HDF5 file."""
+        """Get item by lazy loading from HDF5 file with caching."""
         file_idx, ep_idx_in_file, start_idx = self.sequences[idx]
 
-        # Load from HDF5 file
-        filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-        with h5py.File(filepath, "r") as f:
-            ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
-            ep_name = ep_names[ep_idx_in_file]
-            ep_group = f[ep_name]
+        # Use cached file handle
+        f = self._get_file_handle(file_idx)
+        ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+        ep_name = ep_names[ep_idx_in_file]
+        ep_group = f[ep_name]
 
-            # Extract sequence
-            end_idx = start_idx + self.sequence_length
-            if self.include_initial_frame:
-                obs_seq = ep_group["observations"][start_idx : end_idx + 1]
-            else:
-                obs_seq = ep_group["observations"][start_idx + 1 : end_idx + 1]
+        # Extract sequence
+        end_idx = start_idx + self.sequence_length
+        if self.include_initial_frame:
+            obs_seq = ep_group["observations"][start_idx : end_idx + 1]
+        else:
+            obs_seq = ep_group["observations"][start_idx + 1 : end_idx + 1]
 
-            actions_seq = ep_group["actions"][start_idx:end_idx]
-            rewards_seq = ep_group["rewards"][start_idx:end_idx]
-            dones_seq = ep_group["dones"][start_idx:end_idx]
+        actions_seq = ep_group["actions"][start_idx:end_idx]
+        rewards_seq = ep_group["rewards"][start_idx:end_idx]
+        dones_seq = ep_group["dones"][start_idx:end_idx]
 
-            # Convert to tensors
-            return {
-                "observations": torch.from_numpy(np.array(obs_seq))
-                .float()
-                .permute(0, 3, 1, 2),  # (T, C, H, W)
-                "actions": torch.from_numpy(np.array(actions_seq)).float(),
-                "rewards": torch.from_numpy(np.array(rewards_seq)).float(),
-                "dones": torch.from_numpy(np.array(dones_seq)).bool(),
-            }
+        # Convert to tensors
+        return {
+            "observations": torch.from_numpy(np.array(obs_seq))
+            .float()
+            .permute(0, 3, 1, 2),  # (T, C, H, W)
+            "actions": torch.from_numpy(np.array(actions_seq)).float(),
+            "rewards": torch.from_numpy(np.array(rewards_seq)).float(),
+            "dones": torch.from_numpy(np.array(dones_seq)).bool(),
+        }
+
+    def __del__(self):
+        """Close all file handles when dataset is destroyed."""
+        for handle in self._file_handles.values():
+            try:
+                handle.close()
+            except:
+                pass
 
 
 class ImageDataset(torch.utils.data.Dataset):
@@ -782,6 +813,10 @@ class ImageDataset(torch.utils.data.Dataset):
         self.chunk_files = chunk_files
         self.lazy_load = (data_dir is not None and chunk_files is not None)
         self.subsample_rate = subsample_rate
+
+        # Cache for HDF5 file handles (process-local for DataLoader workers)
+        # Note: initialized as empty dict, no lock needed since each worker has its own process
+        self._file_handles = {}
 
         if self.lazy_load:
             # Lazy loading mode: build index without loading images
@@ -843,23 +878,50 @@ class ImageDataset(torch.utils.data.Dataset):
         img = self.images[idx]
         return torch.from_numpy(img).float().permute(2, 0, 1)
 
-    def _get_lazy_item(self, idx: int) -> torch.Tensor:
-        """Get item by lazy loading from HDF5 file.
+    def _get_file_handle(self, file_idx: int) -> h5py.File:
+        """Get cached file handle for the given file index.
 
-        Note: This method opens HDF5 files on each access. For better performance,
-        consider using persistent file handles, but be aware of multiprocessing limitations.
+        Uses process-level caching to avoid reopening files repeatedly.
+        Each worker process maintains its own cache.
+        """
+        import os
+        pid = os.getpid()  # Get current process ID for worker isolation
+        cache_key = (pid, file_idx)
+
+        if cache_key not in self._file_handles:
+            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+            # Open with large cache for better performance
+            self._file_handles[cache_key] = h5py.File(
+                filepath, "r",
+                rdcc_nbytes=512*1024*1024,  # 512MB cache per file
+                rdcc_nslots=20000
+            )
+
+        return self._file_handles[cache_key]
+
+    def _get_lazy_item(self, idx: int) -> torch.Tensor:
+        """Get item by lazy loading from HDF5 file with caching.
+
+        Uses cached file handles to avoid reopening files on each access.
         """
         file_idx, ep_idx_in_file, frame_idx = self.image_indices[idx]
 
-        # Load from HDF5 file (opening on each access for thread-safety with DataLoader workers)
-        filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-        with h5py.File(filepath, "r", rdcc_nbytes=1024**3, rdcc_nslots=10000) as f:
-            ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
-            ep_name = ep_names[ep_idx_in_file]
-            img = f[ep_name]["observations"][frame_idx]
+        # Use cached file handle
+        f = self._get_file_handle(file_idx)
+        ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+        ep_name = ep_names[ep_idx_in_file]
+        img = f[ep_name]["observations"][frame_idx]
 
-            # Convert to tensor and permute to (C, H, W)
-            return torch.from_numpy(np.array(img)).float().permute(2, 0, 1)
+        # Convert to tensor and permute to (C, H, W)
+        return torch.from_numpy(np.array(img)).float().permute(2, 0, 1)
+
+    def __del__(self):
+        """Close all file handles when dataset is destroyed."""
+        for handle in self._file_handles.values():
+            try:
+                handle.close()
+            except:
+                pass
 
 
 def test_parallel_performance():
