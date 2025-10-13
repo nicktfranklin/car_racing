@@ -42,6 +42,7 @@ dependencies = [
     "pyyaml>=6.0.0",
     "scikit-image>=0.19.0",
     "lightning>=2.3.3",
+    "tensorboard>=2.14.0",
 ]
 
 [project.optional-dependencies]

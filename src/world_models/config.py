@@ -26,15 +26,23 @@ class OptimizerConfig(BaseModel):
     beta1: float = Field(default=0.9, description="Adam beta1 parameter")
     beta2: float = Field(default=0.999, description="Adam beta2 parameter")
     epsilon: float = Field(default=1e-8, description="Adam epsilon parameter")
-    weight_decay: float = Field(default=0.0, description="Weight decay (L2 regularization)")
-    amsgrad: bool = Field(default=False, description="Whether to use AMSGrad variant of Adam")
+    weight_decay: float = Field(
+        default=0.0, description="Weight decay (L2 regularization)"
+    )
+    amsgrad: bool = Field(
+        default=False, description="Whether to use AMSGrad variant of Adam"
+    )
 
     # SGD parameters
     momentum: float = Field(default=0.9, description="SGD momentum")
-    nesterov: bool = Field(default=False, description="Whether to use Nesterov momentum")
+    nesterov: bool = Field(
+        default=False, description="Whether to use Nesterov momentum"
+    )
 
     # Learning rate scheduler
-    use_scheduler: bool = Field(default=False, description="Whether to use LR scheduler")
+    use_scheduler: bool = Field(
+        default=False, description="Whether to use LR scheduler"
+    )
     scheduler: str = Field(
         default="cosine",
         description="LR scheduler type (cosine, step, exponential, reduce_on_plateau)",
@@ -42,11 +50,15 @@ class OptimizerConfig(BaseModel):
 
     # Scheduler parameters
     warmup_epochs: int = Field(default=0, description="Number of warmup epochs")
-    min_lr: float = Field(default=1e-6, description="Minimum learning rate for schedulers")
+    min_lr: float = Field(
+        default=1e-6, description="Minimum learning rate for schedulers"
+    )
 
     # Step scheduler
     step_size: int = Field(default=30, description="Step size for StepLR")
-    gamma: float = Field(default=0.1, description="Multiplicative factor for StepLR/ExponentialLR")
+    gamma: float = Field(
+        default=0.1, description="Multiplicative factor for StepLR/ExponentialLR"
+    )
 
     # ReduceLROnPlateau
     patience: int = Field(default=10, description="Patience for ReduceLROnPlateau")
@@ -94,7 +106,9 @@ class FSQVAEConfig(BaseModel):
     )
 
     # Training parameters
-    learning_rate: float = Field(default=1e-3, description="Learning rate (deprecated, use optimizer config)")
+    learning_rate: float = Field(
+        default=1e-3, description="Learning rate (deprecated, use optimizer config)"
+    )
     beta: float = Field(default=1.0, description="Commitment loss weight")
 
     # Optimizer configuration
@@ -123,7 +137,9 @@ class WorldModelConfig(BaseModel):
     )
 
     # Training parameters
-    learning_rate: float = Field(default=1e-3, description="Learning rate (deprecated, use optimizer config)")
+    learning_rate: float = Field(
+        default=1e-3, description="Learning rate (deprecated, use optimizer config)"
+    )
     sequence_length: int = Field(default=50, description="Training sequence length")
 
     # Optimizer configuration
@@ -148,7 +164,9 @@ class ControllerConfig(BaseModel):
     action_dim: int = Field(default=3, description="Action dimension")
 
     # Training parameters
-    learning_rate: float = Field(default=1e-3, description="Learning rate (deprecated, use optimizer config)")
+    learning_rate: float = Field(
+        default=1e-3, description="Learning rate (deprecated, use optimizer config)"
+    )
 
     # Optimizer configuration
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
@@ -198,7 +216,7 @@ class TrainingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     # General training
-    device: str = Field(default="cuda", description="Training device")
+    device: str = Field(default="mps", description="Training device")
     batch_size: int = Field(default=32, description="Batch size")
     num_epochs: int = Field(default=100, description="Number of training epochs")
 
@@ -215,9 +233,7 @@ class TrainingConfig(BaseModel):
     steps_per_epoch: int = Field(
         default=1000, description="Number of batches per epoch (for random sampling)"
     )
-    val_samples: int = Field(
-        default=500, description="Number of validation samples"
-    )
+    val_samples: int = Field(default=500, description="Number of validation samples")
     val_split: float = Field(
         default=0.05, description="Fraction of data to use for validation"
     )
@@ -232,11 +248,14 @@ class TrainingConfig(BaseModel):
     )
 
     # World Model specific parameters
+    world_model_batch_size: int = Field(
+        default=32, description="Batch size for world model training (lower than VAE due to sequences)"
+    )
     world_model_steps_per_epoch: int = Field(
-        default=1000, description="Number of batches per epoch for world model training"
+        default=200, description="Number of batches per epoch for world model training"
     )
     world_model_val_samples: int = Field(
-        default=500, description="Number of validation samples for world model"
+        default=200, description="Number of validation samples for world model"
     )
 
     # Evaluation

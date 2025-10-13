@@ -180,6 +180,7 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     """Train the FSQ-VAE using PyTorch Lightning."""
     import lightning as L
     from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+    from lightning.pytorch.loggers import TensorBoardLogger
 
     # Create dataset with lazy loading (don't load all episodes into memory)
     collector = DataCollector(config.data)
@@ -231,16 +232,23 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
         verbose=True,
     )
 
+    # Setup TensorBoard logger
+    tb_logger = TensorBoardLogger(
+        save_dir=config.training.checkpoint_dir,
+        name="vae_logs",
+        version=None,  # Auto-increment version
+    )
+
     # Create trainer
     trainer = L.Trainer(
         max_epochs=config.training.train_vae_epochs,
         callbacks=[checkpoint_callback, early_stopping],
+        logger=tb_logger,
         accelerator="auto",
         devices=1,
         log_every_n_steps=config.training.log_every,
         val_check_interval=1.0,  # Validate every epoch
         enable_progress_bar=True,
-        default_root_dir=config.training.checkpoint_dir,
     )
 
     # Train
@@ -260,8 +268,10 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
 
     trainer.fit(lightning_module, train_loader, val_loader, ckpt_path=ckpt_path)
 
-    print("VAE training completed!")
+    print("\nVAE training completed!")
     print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+    print(f"\nTensorBoard logs saved to: {tb_logger.log_dir}")
+    print("To view logs, run: tensorboard --logdir={}/vae_logs".format(config.training.checkpoint_dir))
 
     return vae
 
@@ -276,6 +286,7 @@ def train_world_model(
 
     import lightning as L
     from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+    from lightning.pytorch.loggers import TensorBoardLogger
 
     # Create dataset with lazy loading (don't load all episodes into memory)
     collector = DataCollector(config.data)
@@ -298,7 +309,7 @@ def train_world_model(
 
     train_loader, val_loader = create_sequence_train_val_dataloaders(
         dataset=dataset,
-        batch_size=config.training.batch_size,
+        batch_size=config.training.world_model_batch_size,
         num_workers=config.training.num_dataloader_workers,
         val_split=config.training.val_split,
         train_samples_per_epoch=config.training.world_model_steps_per_epoch,
@@ -348,12 +359,20 @@ def train_world_model(
         mode="min",
     )
 
+    # Setup TensorBoard logger
+    tb_logger = TensorBoardLogger(
+        save_dir=config.training.checkpoint_dir,
+        name="world_model_logs",
+        version=None,  # Auto-increment version
+    )
+
     # Create trainer
     trainer = L.Trainer(
         max_epochs=config.training.train_world_model_epochs,
         accelerator="auto",
         devices=1,
         callbacks=[checkpoint_callback, early_stopping],
+        logger=tb_logger,
         limit_train_batches=config.training.world_model_steps_per_epoch,
         val_check_interval=1.0,
         log_every_n_steps=50,
@@ -382,6 +401,8 @@ def train_world_model(
 
     print("\nWorld model training completed!")
     print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+    print(f"\nTensorBoard logs saved to: {tb_logger.log_dir}")
+    print("To view logs, run: tensorboard --logdir={}/world_model_logs".format(config.training.checkpoint_dir))
 
     return world_model
 

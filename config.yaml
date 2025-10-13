@@ -44,7 +44,7 @@ world_model:
   action_dim: 3
   fsq_levels: [8, 5, 5, 5]  # Must match fsq_vae
   learning_rate: 0.001  # Deprecated, use optimizer.learning_rate
-  sequence_length: 50
+  sequence_length: 32  # Reduced from 50 for faster training
 
   # Optimizer configuration
   optimizer:
@@ -123,8 +123,9 @@ training:
   subsample_rate: 4  # Use every Nth frame (4 = 25% of frames)
 
   # Lightning training parameters - World Model
-  world_model_steps_per_epoch: 1000  # Number of batches per epoch for world model
-  world_model_val_samples: 500  # Number of validation samples for world model
+  world_model_batch_size: 32  # Smaller batch size due to sequence length
+  world_model_steps_per_epoch: 200  # Fewer batches for faster epochs
+  world_model_val_samples: 200  # Validation samples for world model
 
   eval_every: 10
   save_every: 25
