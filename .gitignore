@@ -203,3 +203,5 @@ wandb/
 .claude
 data/
 lightning_logs/
+*png
+data_old/

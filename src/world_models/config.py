@@ -215,7 +215,10 @@ class DataConfig(BaseModel):
     num_workers: int = Field(
         default=-1, description="Number of parallel workers (-1 for auto)"
     )
-    batch_size: int = Field(default=100, description="Episodes per worker batch")
+    batch_size: int = Field(default=100, description="Episodes per worker batch (deprecated)")
+    episodes_per_batch: int = Field(
+        default=10, description="Number of episodes each worker collects before returning (higher = less overhead)"
+    )
 
     # Checkpointing
     checkpoint_every: int = Field(

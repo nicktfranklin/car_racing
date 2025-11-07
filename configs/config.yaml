@@ -1,5 +1,5 @@
-# Example configuration for using Transformer World Model instead of LSTM
-# This uses a GPT-2 style architecture for world modeling
+# Configuration for CarRacing World Model Agent
+# Uses GPT-2 style transformer for world modeling
 
 fsq_vae:
   input_channels: 3
@@ -38,17 +38,12 @@ fsq_vae:
     grad_clip_norm: null
 
 world_model:
-  # Model type: 'lstm' or 'transformer'
-  model_type: transformer
-
-  # Shared architecture parameters
-  hidden_size: 256  # Embedding dimension for transformer
-  dropout: 0.1  # Dropout rate (transformers typically use ~0.1)
-
-  # Transformer-specific parameters
-  n_layers: 6  # Number of transformer layers (GPT-2 small uses 12, we use 6 for efficiency)
-  n_heads: 8  # Number of attention heads (must divide hidden_size evenly)
-  use_cache: true  # Enable KV caching for fast generation
+  # Transformer architecture (GPT-2 based)
+  hidden_size: 256  # Embedding dimension
+  dropout: 0.1  # Dropout rate
+  n_layers: 6  # Number of transformer layers
+  n_heads: 8  # Number of attention heads
+  num_layers: 6  # Alias for compatibility
 
   # Input/Output dimensions
   state_dim: 4  # Match fsq_levels length
@@ -56,8 +51,8 @@ world_model:
   fsq_levels: [8, 8, 8, 4]  # Must match fsq_vae - 2048 codes
 
   # Training parameters
-  learning_rate: 0.0003  # Deprecated, use optimizer.learning_rate (transformers often use lower LR)
-  sequence_length: 64  # Longer sequences benefit transformers more than LSTMs
+  learning_rate: 0.0003  # Deprecated, use optimizer.learning_rate
+  sequence_length: 64  # Longer sequences benefit transformers
 
   # Optimizer configuration
   optimizer:
@@ -104,8 +99,9 @@ data:
   render_mode: null
   num_rollouts: 10000
   max_episode_length: 2000
-  num_workers: 4
-  batch_size: 100
+  num_workers: -1  # Auto-detect CPUs (was 4)
+  batch_size: 100  # Deprecated
+  episodes_per_batch: 10  # Episodes per worker (higher = faster, more memory)
   frame_skip: 4
   frame_stack: 1
   data_dir: ./data

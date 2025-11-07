@@ -6,6 +6,7 @@ import gc
 import multiprocessing as mp
 import os
 import time
+import warnings
 from concurrent.futures import ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from typing import Dict, List, Optional, Tuple
 
@@ -14,6 +15,10 @@ import h5py
 import numpy as np
 import torch
 from tqdm import tqdm
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
 try:
     from .config import DataConfig
@@ -66,6 +71,13 @@ def collect_episodes_worker(
     args: Tuple[str, Optional[str], int, int, int],
 ) -> List[Episode]:
     """Worker function for parallel episode collection."""
+    import warnings
+    import os
+
+    # Suppress all warnings in worker processes
+    warnings.filterwarnings('ignore')
+    os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+
     env_name, render_mode, num_episodes, max_episode_length, worker_id = args
 
     # Create environment for this worker (None render mode for fastest collection)
@@ -149,24 +161,23 @@ class DataCollector:
         remaining = num_episodes - existing_count
 
         if remaining <= 0:
-            print(f"✅ Already have {existing_count} episodes (target: {num_episodes})")
             return []
-
-        print(f"📊 Progress: {existing_count}/{num_episodes} episodes completed")
-        print(f"🔄 Collecting remaining {remaining} episodes...")
 
         # Collect in chunks with checkpointing (memory efficient - don't load existing episodes)
         episodes_collected = 0
 
         # Create single progress bar for all chunks
-        with tqdm(total=remaining, desc=f"Collecting episodes ({existing_count} already done)") as pbar:
+        with tqdm(
+            total=num_episodes,
+            initial=existing_count,
+            desc="Collecting episodes",
+            unit="ep",
+            ncols=100,
+            bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
+        ) as pbar:
             while episodes_collected < remaining:
                 # Determine chunk size
                 chunk_size = min(checkpoint_every, remaining - episodes_collected)
-
-                print(
-                    f"\n🎯 Collecting chunk: {chunk_size} episodes ({existing_count + episodes_collected + chunk_size}/{num_episodes} total)"
-                )
 
                 # Collect chunk without its own progress bar
                 chunk_episodes = self._collect_episodes_no_checkpoint_for_chunking(
@@ -187,13 +198,6 @@ class DataCollector:
 
                 episodes_collected += chunk_count
 
-                print(
-                    f"💾 Checkpoint saved to {chunk_file}: {existing_count + episodes_collected}/{num_episodes} episodes total"
-                )
-
-        print(
-            f"✅ Data collection completed: {existing_count + episodes_collected} episodes total"
-        )
         # Don't load all episodes into memory - they're already saved to disk
         return []
 
@@ -295,33 +299,36 @@ class DataCollector:
         self, num_episodes: int, num_workers: int, pbar
     ) -> List[Episode]:
         """Parallel episode collection with external progress bar - memory efficient."""
-        print(
-            f"Collecting {num_episodes} episodes using {num_workers} parallel workers..."
-        )
+        # OPTIMIZATION: Batch multiple episodes per worker to reduce process spawning overhead
+        episodes_per_batch = getattr(self.config, 'episodes_per_batch', 10)
 
         start_time = time.time()
         all_episodes = []
 
-        # Use ProcessPoolExecutor with sliding window to limit memory usage
-        # Only keep num_workers tasks in flight at once to reduce memory pressure
-        max_in_flight = num_workers
+        # OPTIMIZATION: Increase max_in_flight for better throughput
+        # Allow more tasks to be queued to keep workers busy
+        max_in_flight = num_workers * 3
 
         with ProcessPoolExecutor(max_workers=num_workers) as executor:
-            futures = {}  # Map future -> episode_id
+            futures = {}  # Map future -> (episode_id, batch_size)
             episode_id = 0
 
             # Submit initial batch
-            while episode_id < min(max_in_flight, num_episodes):
+            while episode_id < min(max_in_flight * episodes_per_batch, num_episodes):
+                # Calculate how many episodes this batch should collect
+                remaining = num_episodes - episode_id
+                batch_size = min(episodes_per_batch, remaining)
+
                 args = (
                     self.config.env_name,
                     self.config.render_mode,
-                    1,  # Collect 1 episode per worker job
+                    batch_size,  # Collect multiple episodes per worker
                     self.config.max_episode_length,
                     episode_id,  # worker_id
                 )
                 future = executor.submit(collect_episodes_worker, args)
-                futures[future] = episode_id
-                episode_id += 1
+                futures[future] = (episode_id, batch_size)
+                episode_id += batch_size
 
             # Process results and submit new tasks as others complete
             while futures:
@@ -332,38 +339,29 @@ class DataCollector:
                     try:
                         episodes = future.result()
                         all_episodes.extend(episodes)
-                        pbar.update(1)
+                        pbar.update(len(episodes))
                     except Exception as exc:
                         print(f"Worker generated an exception: {exc}")
 
                     # Remove completed future
+                    _, batch_size = futures[future]
                     del futures[future]
 
                     # Submit new task if more episodes needed
                     if episode_id < num_episodes:
+                        remaining = num_episodes - episode_id
+                        batch_size = min(episodes_per_batch, remaining)
+
                         args = (
                             self.config.env_name,
                             self.config.render_mode,
-                            1,
+                            batch_size,
                             self.config.max_episode_length,
                             episode_id,
                         )
                         new_future = executor.submit(collect_episodes_worker, args)
-                        futures[new_future] = episode_id
-                        episode_id += 1
-
-        elapsed = time.time() - start_time
-
-        # Print statistics
-        if all_episodes:
-            lengths = [len(ep) for ep in all_episodes]
-            returns = [sum(ep.rewards) for ep in all_episodes]
-            print(f"\n📊 Collection completed in {elapsed:.1f}s:")
-            print(f"  • Episodes: {len(all_episodes)}")
-            print(f"  • Avg length: {np.mean(lengths):.1f} ± {np.std(lengths):.1f}")
-            print(f"  • Avg return: {np.mean(returns):.2f} ± {np.std(returns):.2f}")
-            print(f"  • Total steps: {sum(lengths):,}")
-            print(f"  • Steps/second: {sum(lengths)/elapsed:.0f}")
+                        futures[new_future] = (episode_id, batch_size)
+                        episode_id += batch_size
 
         return all_episodes
 
@@ -375,9 +373,8 @@ class DataCollector:
         total_episodes: int = None,
     ) -> List[Episode]:
         """Parallel episode collection using multiprocessing - memory efficient."""
-        print(
-            f"Collecting {num_episodes} episodes using {num_workers} parallel workers..."
-        )
+        # OPTIMIZATION: Batch multiple episodes per worker to reduce process spawning overhead
+        episodes_per_batch = getattr(self.config, 'episodes_per_batch', 10)
 
         start_time = time.time()
         all_episodes = []
@@ -387,9 +384,8 @@ class DataCollector:
             (total_episodes - existing_count) if total_episodes else num_episodes
         )
 
-        # Use ProcessPoolExecutor with sliding window to limit memory usage
-        # Only keep num_workers tasks in flight at once to reduce memory pressure
-        max_in_flight = num_workers
+        # OPTIMIZATION: Increase max_in_flight for better throughput
+        max_in_flight = num_workers * 3
 
         with tqdm(
             total=pbar_total,
@@ -397,21 +393,24 @@ class DataCollector:
             desc=f"Collecting episodes ({existing_count} already done)",
         ) as episode_pbar:
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                futures = {}  # Map future -> episode_id
+                futures = {}  # Map future -> (episode_id, batch_size)
                 episode_id = 0
 
                 # Submit initial batch
-                while episode_id < min(max_in_flight, num_episodes):
+                while episode_id < min(max_in_flight * episodes_per_batch, num_episodes):
+                    remaining = num_episodes - episode_id
+                    batch_size = min(episodes_per_batch, remaining)
+
                     args = (
                         self.config.env_name,
                         self.config.render_mode,
-                        1,  # Collect 1 episode per worker job
+                        batch_size,  # Collect multiple episodes per worker
                         self.config.max_episode_length,
                         episode_id,  # worker_id
                     )
                     future = executor.submit(collect_episodes_worker, args)
-                    futures[future] = episode_id
-                    episode_id += 1
+                    futures[future] = (episode_id, batch_size)
+                    episode_id += batch_size
 
                 # Process results and submit new tasks as others complete
                 while futures:
@@ -422,38 +421,29 @@ class DataCollector:
                         try:
                             episodes = future.result()
                             all_episodes.extend(episodes)
-                            episode_pbar.update(1)
+                            episode_pbar.update(len(episodes))
                         except Exception as exc:
                             print(f"Worker generated an exception: {exc}")
 
                         # Remove completed future
+                        _, batch_size = futures[future]
                         del futures[future]
 
                         # Submit new task if more episodes needed
                         if episode_id < num_episodes:
+                            remaining = num_episodes - episode_id
+                            batch_size = min(episodes_per_batch, remaining)
+
                             args = (
                                 self.config.env_name,
                                 self.config.render_mode,
-                                1,
+                                batch_size,
                                 self.config.max_episode_length,
                                 episode_id,
                             )
                             new_future = executor.submit(collect_episodes_worker, args)
-                            futures[new_future] = episode_id
-                            episode_id += 1
-
-        elapsed = time.time() - start_time
-
-        # Print statistics
-        if all_episodes:
-            lengths = [len(ep) for ep in all_episodes]
-            returns = [sum(ep.rewards) for ep in all_episodes]
-            print(f"\n📊 Collection completed in {elapsed:.1f}s:")
-            print(f"  • Episodes: {len(all_episodes)}")
-            print(f"  • Avg length: {np.mean(lengths):.1f} ± {np.std(lengths):.1f}")
-            print(f"  • Avg return: {np.mean(returns):.2f} ± {np.std(returns):.2f}")
-            print(f"  • Total steps: {sum(lengths):,}")
-            print(f"  • Steps/second: {sum(lengths)/elapsed:.0f}")
+                            futures[new_future] = (episode_id, batch_size)
+                            episode_id += batch_size
 
         return all_episodes
 
@@ -496,9 +486,9 @@ class DataCollector:
         os.makedirs(self.config.data_dir, exist_ok=True)
         filepath = os.path.join(self.config.data_dir, filename)
 
-        # Save as HDF5 with optimized compression
+        # Save as HDF5 with optimized compression (silently)
         with h5py.File(filepath, "w") as f:
-            for i, episode in enumerate(tqdm(episodes, desc="Saving episodes")):
+            for i, episode in enumerate(episodes):
                 obs, actions, rewards, dones = episode.to_arrays()
 
                 ep_group = f.create_group(f"episode_{i}")
@@ -517,9 +507,6 @@ class DataCollector:
                 ep_group.create_dataset("actions", data=actions, compression="gzip")
                 ep_group.create_dataset("rewards", data=rewards, compression="gzip")
                 ep_group.create_dataset("dones", data=dones, compression="gzip")
-
-        file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
-        print(f"Saved {len(episodes)} episodes to {filepath} ({file_size_mb:.1f} MB)")
 
     def _get_chunk_filename(self, base_filename: str, chunk_idx: int) -> str:
         """Generate filename for a chunk."""
