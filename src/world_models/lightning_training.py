@@ -117,30 +117,78 @@ class VAELightningModule(L.LightningModule):
         self.config = config
         self.save_hyperparameters(ignore=["model"])
 
+        # Move perceptual loss to correct device if it exists
+        if hasattr(self.model, 'perceptual_loss') and self.model.perceptual_loss is not None:
+            self.model.perceptual_loss = self.model.perceptual_loss.to(self.device)
+
     def forward(self, x):
         return self.model(x)
 
     def training_step(self, batch, batch_idx):
         images = batch
         x_recon, z, z_q = self.model(images)
-        loss, loss_dict = self.model.compute_loss(images, x_recon, z, z_q)
+
+        # Get indices for codebook monitoring
+        _, indices = self.model.quantizer(z)
+
+        loss, loss_dict = self.model.compute_loss(images, x_recon, z, z_q, indices)
 
         # Log metrics
         self.log("train/loss", loss_dict["total_loss"], prog_bar=True)
-        self.log("train/recon_loss", loss_dict["recon_loss"])
+
+        # Reconstruction metrics (grouped for easy comparison)
+        self.log("train/recon_loss", loss_dict["recon_loss"], prog_bar=True)
+        self.log("train/mse_loss", loss_dict["mse_loss"])
+        if "perceptual_loss" in loss_dict:
+            self.log("train/perceptual_loss", loss_dict["perceptual_loss"])
+
+        # Other losses
         self.log("train/commitment_loss", loss_dict["commitment_loss"])
+        if "entropy_loss" in loss_dict:
+            self.log("train/entropy_loss", loss_dict["entropy_loss"])
+
+        # Codebook collapse metrics (grouped for monitoring)
+        if "codebook_usage" in loss_dict:
+            self.log("train/codebook_usage", loss_dict["codebook_usage"])
+            self.log("train/unique_codes", loss_dict["unique_codes"])
+        if "codebook_perplexity" in loss_dict:
+            # Perplexity is the key metric - show in progress bar
+            self.log("train/codebook_perplexity", loss_dict["codebook_perplexity"], prog_bar=True)
+            self.log("train/perplexity_ratio", loss_dict["perplexity_ratio"])
 
         return loss
 
     def validation_step(self, batch, batch_idx):
         images = batch
         x_recon, z, z_q = self.model(images)
-        loss, loss_dict = self.model.compute_loss(images, x_recon, z, z_q)
+
+        # Get indices for codebook monitoring
+        _, indices = self.model.quantizer(z)
+
+        loss, loss_dict = self.model.compute_loss(images, x_recon, z, z_q, indices)
 
         # Log validation metrics
         self.log("val/loss", loss_dict["total_loss"], prog_bar=True)
-        self.log("val/recon_loss", loss_dict["recon_loss"])
+
+        # Reconstruction metrics (grouped for easy comparison)
+        self.log("val/recon_loss", loss_dict["recon_loss"], prog_bar=True)
+        self.log("val/mse_loss", loss_dict["mse_loss"])
+        if "perceptual_loss" in loss_dict:
+            self.log("val/perceptual_loss", loss_dict["perceptual_loss"])
+
+        # Other losses
         self.log("val/commitment_loss", loss_dict["commitment_loss"])
+        if "entropy_loss" in loss_dict:
+            self.log("val/entropy_loss", loss_dict["entropy_loss"])
+
+        # Codebook collapse metrics (grouped for monitoring)
+        if "codebook_usage" in loss_dict:
+            self.log("val/codebook_usage", loss_dict["codebook_usage"])
+            self.log("val/unique_codes", loss_dict["unique_codes"])
+        if "codebook_perplexity" in loss_dict:
+            # Perplexity is the key metric for collapse detection
+            self.log("val/codebook_perplexity", loss_dict["codebook_perplexity"], prog_bar=True)
+            self.log("val/perplexity_ratio", loss_dict["perplexity_ratio"])
 
         return loss
 
@@ -187,6 +235,7 @@ class WorldModelLightningModule(L.LightningModule):
         with torch.no_grad():
             obs_flat = observations.reshape(-1, *observations.shape[2:])
             z_q, indices = self.vae.encode(obs_flat)
+            # indices is now (B*T) with single code per image
             indices = indices.reshape(batch_size, seq_len_plus_one)
 
         current_states = indices[:, :-1]
@@ -217,6 +266,7 @@ class WorldModelLightningModule(L.LightningModule):
         with torch.no_grad():
             obs_flat = observations.reshape(-1, *observations.shape[2:])
             z_q, indices = self.vae.encode(obs_flat)
+            # indices is now (B*T) with single code per image
             indices = indices.reshape(batch_size, seq_len_plus_one)
 
         current_states = indices[:, :-1]

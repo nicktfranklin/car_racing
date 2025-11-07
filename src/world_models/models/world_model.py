@@ -1,5 +1,8 @@
 """
-LSTM-based world model with softmax over state tokens.
+GPT-2 based transformer world model using HuggingFace transformers.
+
+This is the default world model - a causal transformer that autoregressively
+predicts next states, rewards, and dones given sequences of (state, action) pairs.
 """
 
 from typing import Optional, Tuple
@@ -8,127 +11,189 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers import GPT2Config, GPT2Model
 
 from ..config import WorldModelConfig
 
 
 class WorldModel(nn.Module):
-    """LSTM-based world model that predicts next state tokens."""
+    """GPT-2 based world model that predicts next state tokens autoregressively."""
 
     def __init__(self, config: WorldModelConfig):
         super().__init__()
         self.config = config
-        self.hidden_size = config.hidden_size
-        self.num_layers = config.num_layers
 
-        # Calculate total number of state tokens
+        # Calculate total number of state tokens (FSQ codebook size)
         self.num_state_tokens = int(np.prod(config.fsq_levels))
         self.fsq_dim = len(config.fsq_levels)
 
-        # Input embedding: combine current state indices and action
+        # GPT-2 configuration (scaled for world modeling)
+        # Using smaller dimensions than GPT-2 since we have:
+        # - Small discrete state space (~1000-2000 codes)
+        # - Short sequences (~50-100 timesteps)
+        # - Simple dynamics (CarRacing)
+        gpt_config = GPT2Config(
+            vocab_size=1,  # Not used, we have custom embeddings
+            n_positions=config.sequence_length * 2,  # States + actions interleaved
+            n_embd=config.hidden_size,  # Match config (default 256)
+            n_layer=getattr(config, 'n_layers', 6),  # 6 transformer layers
+            n_head=getattr(config, 'n_heads', 8),  # 8 attention heads
+            n_inner=config.hidden_size * 4,  # FFN dimension (standard 4x)
+            activation_function='gelu_new',
+            resid_pdrop=config.dropout,
+            embd_pdrop=config.dropout,
+            attn_pdrop=config.dropout,
+            layer_norm_epsilon=1e-5,
+            initializer_range=0.02,
+            use_cache=True,  # Enable KV caching for fast sampling
+        )
+
+        # Core GPT-2 transformer
+        self.transformer = GPT2Model(gpt_config)
+
+        # Token embeddings (separate for states and actions)
+        # We interleave state and action tokens: [s_0, a_0, s_1, a_1, ...]
         self.state_embedding = nn.Embedding(
-            num_embeddings=self.num_state_tokens, embedding_dim=config.hidden_size // 2
+            num_embeddings=self.num_state_tokens,
+            embedding_dim=config.hidden_size
         )
 
-        # Action projection
-        self.action_projection = nn.Linear(config.action_dim, config.hidden_size // 2)
+        # Action embedding (continuous → discrete embedding space)
+        self.action_embedding = nn.Linear(config.action_dim, config.hidden_size)
 
-        # LSTM core
-        self.lstm = nn.LSTM(
-            input_size=config.hidden_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            dropout=config.dropout if config.num_layers > 1 else 0,
-            batch_first=True,
-        )
+        # Token type embeddings (distinguish state vs action tokens)
+        self.token_type_embedding = nn.Embedding(2, config.hidden_size)
 
-        # Output heads for predicting next state tokens
+        # Output heads
         self.state_head = nn.Linear(config.hidden_size, self.num_state_tokens)
-
-        # Reward prediction head
         self.reward_head = nn.Linear(config.hidden_size, 1)
-
-        # Done prediction head
         self.done_head = nn.Linear(config.hidden_size, 1)
+
+        # Layer norm for output heads
+        self.ln_f = nn.LayerNorm(config.hidden_size, eps=1e-5)
+
+    def create_interleaved_sequence(
+        self,
+        state_indices: torch.Tensor,
+        actions: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Create interleaved sequence of state and action embeddings.
+
+        Args:
+            state_indices: (batch, seq_len) discrete state indices
+            actions: (batch, seq_len, action_dim) continuous actions
+
+        Returns:
+            embeddings: (batch, seq_len*2, hidden_size) interleaved embeddings
+            token_types: (batch, seq_len*2) token type IDs (0=state, 1=action)
+        """
+        batch_size, seq_len = state_indices.shape
+        device = state_indices.device
+
+        # Embed states and actions
+        state_emb = self.state_embedding(state_indices)  # (batch, seq_len, hidden)
+        action_emb = self.action_embedding(actions)  # (batch, seq_len, hidden)
+
+        # Interleave: [s_0, a_0, s_1, a_1, s_2, a_2, ...]
+        embeddings = torch.zeros(
+            batch_size, seq_len * 2, self.config.hidden_size,
+            device=device, dtype=state_emb.dtype
+        )
+        embeddings[:, 0::2] = state_emb  # Even positions: states
+        embeddings[:, 1::2] = action_emb  # Odd positions: actions
+
+        # Token type IDs
+        token_types = torch.zeros(batch_size, seq_len * 2, device=device, dtype=torch.long)
+        token_types[:, 0::2] = 0  # States
+        token_types[:, 1::2] = 1  # Actions
+
+        return embeddings, token_types
 
     def forward(
         self,
         state_indices: torch.Tensor,
         actions: torch.Tensor,
-        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    ) -> Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]
-    ]:
+        hidden: Optional[Tuple] = None,  # For compatibility with LSTM interface
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[Tuple]]:
         """
-        Forward pass through the world model.
+        Forward pass through the transformer world model.
 
         Args:
-            state_indices: Tensor of shape (batch, seq_len) with state token indices
-            actions: Tensor of shape (batch, seq_len, action_dim)
-            hidden: Optional initial hidden state
+            state_indices: (batch, seq_len) state token indices
+            actions: (batch, seq_len, action_dim) continuous actions
+            hidden: Optional past_key_values for fast generation (renamed for compatibility)
 
         Returns:
-            next_state_logits: Logits for next state tokens (batch, seq_len, num_tokens)
-            rewards: Predicted rewards (batch, seq_len, 1)
-            dones: Predicted done flags (batch, seq_len, 1)
-            hidden: Final hidden state
+            next_state_logits: (batch, seq_len, num_tokens) logits for next states
+            rewards: (batch, seq_len, 1) predicted rewards
+            dones: (batch, seq_len, 1) predicted done flags
+            hidden: Cached key-values (if use_cache=True)
         """
         batch_size, seq_len = state_indices.shape
 
-        # Embed state indices
-        state_emb = self.state_embedding(
-            state_indices
-        )  # (batch, seq_len, hidden_size//2)
+        # Create interleaved sequence
+        embeddings, token_types = self.create_interleaved_sequence(
+            state_indices, actions
+        )
 
-        # Project actions
-        action_emb = self.action_projection(actions)  # (batch, seq_len, hidden_size//2)
+        # Add token type embeddings
+        token_type_emb = self.token_type_embedding(token_types)
+        inputs_embeds = embeddings + token_type_emb
 
-        # Combine state and action embeddings
-        lstm_input = torch.cat(
-            [state_emb, action_emb], dim=-1
-        )  # (batch, seq_len, hidden_size)
+        # Forward through GPT-2 transformer
+        # Note: GPT-2 handles position embeddings internally
+        outputs = self.transformer(
+            inputs_embeds=inputs_embeds,
+            past_key_values=hidden,
+            use_cache=True if hidden is not None or self.training == False else False,
+        )
 
-        # LSTM forward pass
-        lstm_output, hidden = self.lstm(
-            lstm_input, hidden
-        )  # (batch, seq_len, hidden_size)
+        hidden_states = outputs.last_hidden_state  # (batch, seq_len*2, hidden)
+        past_key_values = outputs.past_key_values
 
-        # Predict next state tokens
-        next_state_logits = self.state_head(lstm_output)  # (batch, seq_len, num_tokens)
+        # Apply final layer norm
+        hidden_states = self.ln_f(hidden_states)
 
-        # Predict rewards and done flags
-        rewards = self.reward_head(lstm_output)  # (batch, seq_len, 1)
-        dones = self.done_head(lstm_output)  # (batch, seq_len, 1)
+        # Extract features after each (state, action) pair to predict next state
+        # We want features at positions [1, 3, 5, ...] (after each action)
+        # These will predict states at positions [2, 4, 6, ...] (next states)
+        prediction_positions = hidden_states[:, 1::2]  # (batch, seq_len, hidden)
 
-        return next_state_logits, rewards, dones, hidden
+        # Predict next state logits
+        next_state_logits = self.state_head(prediction_positions)
+
+        # Predict rewards and dones
+        rewards = self.reward_head(prediction_positions)
+        dones = self.done_head(prediction_positions)
+
+        return next_state_logits, rewards, dones, past_key_values
 
     def sample_next_state(
         self,
         state_indices: torch.Tensor,
         actions: torch.Tensor,
-        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        hidden: Optional[Tuple] = None,
         temperature: float = 1.0,
-    ) -> Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]
-    ]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[Tuple]]:
         """
         Sample next state from the model distribution.
 
         Args:
             state_indices: Current state indices (batch, 1)
             actions: Actions to take (batch, 1, action_dim)
-            hidden: Current hidden state
+            hidden: Cached key-values for fast generation
             temperature: Sampling temperature
 
         Returns:
             next_state_indices: Sampled next state indices (batch, 1)
             rewards: Predicted rewards (batch, 1, 1)
             dones: Predicted done flags (batch, 1, 1)
-            hidden: Updated hidden state
+            hidden: Updated cached key-values
         """
         with torch.no_grad():
             next_state_logits, rewards, dones, hidden = self.forward(
-                state_indices, actions, hidden
+                state_indices, actions, hidden=hidden
             )
 
             # Sample from categorical distribution
@@ -137,7 +202,7 @@ class WorldModel(nn.Module):
                 next_state_indices = torch.multinomial(probs.squeeze(1), 1)
             else:
                 # Greedy sampling
-                next_state_indices = torch.argmax(next_state_logits, dim=-1)
+                next_state_indices = torch.argmax(next_state_logits, dim=-1, keepdim=True)
 
             return next_state_indices, rewards, dones, hidden
 
@@ -165,56 +230,55 @@ class WorldModel(nn.Module):
         """
         # Forward pass
         next_state_logits, pred_rewards, pred_dones, _ = self.forward(
-            state_indices, actions
+            state_indices, actions, hidden=None
         )
 
         # State prediction loss (cross-entropy)
         state_loss = F.cross_entropy(
             next_state_logits.reshape(-1, self.num_state_tokens),
             next_state_indices.reshape(-1),
-            reduction="mean",
+            reduction='mean',
         )
 
         # Reward prediction loss (MSE)
-        reward_loss = F.mse_loss(pred_rewards.squeeze(-1), rewards, reduction="mean")
+        reward_loss = F.mse_loss(
+            pred_rewards.squeeze(-1), rewards, reduction='mean'
+        )
 
         # Done prediction loss (binary cross-entropy)
         done_loss = F.binary_cross_entropy_with_logits(
-            pred_dones.squeeze(-1), dones.float(), reduction="mean"
+            pred_dones.squeeze(-1), dones.float(), reduction='mean'
         )
 
         # Combined loss
         total_loss = state_loss + reward_loss + done_loss
 
         loss_dict = {
-            "total_loss": total_loss.item(),
-            "state_loss": state_loss.item(),
-            "reward_loss": reward_loss.item(),
-            "done_loss": done_loss.item(),
+            'total_loss': total_loss.item(),
+            'state_loss': state_loss.item(),
+            'reward_loss': reward_loss.item(),
+            'done_loss': done_loss.item(),
         }
 
         # Calculate accuracy for state prediction
         with torch.no_grad():
             state_preds = torch.argmax(next_state_logits, dim=-1)
             state_accuracy = (state_preds == next_state_indices).float().mean()
-            loss_dict["state_accuracy"] = state_accuracy.item()
+            loss_dict['state_accuracy'] = state_accuracy.item()
 
         return total_loss, loss_dict
 
     def init_hidden(
         self, batch_size: int, device: torch.device
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Initialize hidden state."""
-        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_size, device=device)
-        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_size, device=device)
-        return h0, c0
+    ) -> Optional[Tuple]:
+        """Initialize hidden state (returns None for transformer)."""
+        return None
 
     def detach_hidden(
-        self, hidden: Tuple[torch.Tensor, torch.Tensor]
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Detach hidden state from computation graph."""
-        h, c = hidden
-        return h.detach(), c.detach()
+        self, hidden: Optional[Tuple]
+    ) -> Optional[Tuple]:
+        """Detach hidden state (no-op for transformer with KV cache)."""
+        return None
 
 
 def indices_to_fsq(indices: torch.Tensor, levels: list) -> torch.Tensor:
@@ -265,7 +329,9 @@ def fsq_to_indices(fsq_repr: torch.Tensor, levels: list) -> torch.Tensor:
 
 
 if __name__ == "__main__":
-    # Test the World Model implementation
+    # Test the Transformer World Model implementation
+    from ..config import WorldModelConfig
+
     config = WorldModelConfig()
     model = WorldModel(config)
 
@@ -280,8 +346,9 @@ if __name__ == "__main__":
     dones = torch.randint(0, 2, (batch_size, seq_len))
 
     # Test forward pass
+    print("Testing forward pass...")
     with torch.no_grad():
-        next_state_logits, pred_rewards, pred_dones, hidden = model(
+        next_state_logits, pred_rewards, pred_dones, _ = model(
             state_indices, actions
         )
         loss, loss_dict = model.compute_loss(
@@ -296,4 +363,18 @@ if __name__ == "__main__":
     print(f"Number of state tokens: {model.num_state_tokens}")
     print(f"Loss: {loss.item():.4f}")
     print(f"State accuracy: {loss_dict['state_accuracy']:.4f}")
-    print("World Model test passed!")
+
+    # Test sampling with KV caching
+    print("\nTesting sampling with KV caching...")
+    past_kv = None
+    current_state = state_indices[:, 0:1]  # First state
+    for t in range(5):
+        action = actions[:, t:t+1]
+        next_state, reward, done, past_kv = model.sample_next_state(
+            current_state, action, hidden=past_kv, temperature=1.0
+        )
+        print(f"Step {t}: state={next_state[0].item()}, reward={reward[0].item():.3f}")
+        current_state = next_state
+
+    print("\nTransformer World Model test passed!")
+    print(f"Model parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M")

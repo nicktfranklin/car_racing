@@ -111,19 +111,39 @@ class FSQVAEConfig(BaseModel):
     )
     beta: float = Field(default=1.0, description="Commitment loss weight")
 
+    # Perceptual loss
+    use_perceptual_loss: bool = Field(
+        default=True, description="Whether to use perceptual loss (VGG-based)"
+    )
+    perceptual_weight: float = Field(
+        default=1.0, description="Weight for perceptual loss"
+    )
+    mse_weight: float = Field(
+        default=0.1, description="Weight for MSE loss when using perceptual loss"
+    )
+
+    # Codebook diversity (anti-collapse)
+    entropy_weight: float = Field(
+        default=0.1, description="Weight for entropy regularization to encourage diverse code usage"
+    )
+
     # Optimizer configuration
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)
 
 
 class WorldModelConfig(BaseModel):
-    """Configuration for LSTM-based world model."""
+    """Configuration for transformer-based world model."""
 
     model_config = ConfigDict(extra="forbid")
 
     # Architecture
-    hidden_size: int = Field(default=256, description="LSTM hidden size")
-    num_layers: int = Field(default=1, description="Number of LSTM layers")
-    dropout: float = Field(default=0.0, description="Dropout rate")
+    hidden_size: int = Field(default=256, description="Embedding dimension")
+    dropout: float = Field(default=0.1, description="Dropout rate")
+
+    # Transformer parameters
+    n_layers: int = Field(default=6, description="Number of transformer layers")
+    n_heads: int = Field(default=8, description="Number of attention heads")
+    num_layers: int = Field(default=6, description="Alias for n_layers (for compatibility)")
 
     # Input/Output dimensions
     state_dim: int = Field(
@@ -138,9 +158,9 @@ class WorldModelConfig(BaseModel):
 
     # Training parameters
     learning_rate: float = Field(
-        default=1e-3, description="Learning rate (deprecated, use optimizer config)"
+        default=3e-4, description="Learning rate (deprecated, use optimizer config)"
     )
-    sequence_length: int = Field(default=50, description="Training sequence length")
+    sequence_length: int = Field(default=64, description="Training sequence length")
 
     # Optimizer configuration
     optimizer: OptimizerConfig = Field(default_factory=OptimizerConfig)

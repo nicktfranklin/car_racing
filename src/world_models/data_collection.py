@@ -83,21 +83,19 @@ def collect_episodes_worker(
         episode = Episode()
         obs, _ = env.reset()
 
-        # Preprocess observation
+        # Preprocess observation - keep as uint8 for efficient storage
         from skimage.transform import resize
 
-        obs = obs.astype(np.float32) / 255.0
-        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True)
+        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(np.uint8)
 
         for step in range(max_episode_length):
             action = agent.get_action(obs)
             next_obs, reward, terminated, truncated, _ = env.step(action)
 
-            # Preprocess next observation
-            next_obs = next_obs.astype(np.float32) / 255.0
+            # Preprocess next observation - keep as uint8
             next_obs = resize(
                 next_obs, (64, 64), anti_aliasing=True, preserve_range=True
-            )
+            ).astype(np.uint8)
 
             episode.add_step(obs, action, reward, terminated or truncated)
             obs = next_obs
@@ -484,34 +482,44 @@ class DataCollector:
         return episode
 
     def _preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
-        """Preprocess observation."""
-        # Convert to float and normalize to [0, 1]
-        obs = obs.astype(np.float32) / 255.0
-
-        # Resize from 96x96 to 64x64
+        """Preprocess observation - keep as uint8 for efficient storage."""
         from skimage.transform import resize
 
-        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True)
+        # Resize from 96x96 to 64x64 and keep as uint8 [0, 255]
+        # Don't normalize to [0, 1] - that happens at load time
+        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(np.uint8)
 
         return obs
 
     def save_episodes(self, episodes: List[Episode], filename: str):
-        """Save episodes to disk."""
+        """Save episodes to disk with optimized uint8 compression."""
         os.makedirs(self.config.data_dir, exist_ok=True)
         filepath = os.path.join(self.config.data_dir, filename)
 
-        # Save as HDF5 for efficient storage
+        # Save as HDF5 with optimized compression
         with h5py.File(filepath, "w") as f:
             for i, episode in enumerate(tqdm(episodes, desc="Saving episodes")):
                 obs, actions, rewards, dones = episode.to_arrays()
 
                 ep_group = f.create_group(f"episode_{i}")
-                ep_group.create_dataset("observations", data=obs, compression="gzip")
-                ep_group.create_dataset("actions", data=actions)
-                ep_group.create_dataset("rewards", data=rewards)
-                ep_group.create_dataset("dones", data=dones)
 
-        print(f"Saved {len(episodes)} episodes to {filepath}")
+                # Store observations as uint8 with gzip compression and optimal chunking
+                # Images should already be uint8 from _preprocess_observation
+                ep_group.create_dataset(
+                    "observations",
+                    data=obs,
+                    compression="gzip",
+                    compression_opts=4,
+                    chunks=(1, 64, 64, 3)  # Optimize for frame-level access
+                )
+
+                # Add compression to other datasets too
+                ep_group.create_dataset("actions", data=actions, compression="gzip")
+                ep_group.create_dataset("rewards", data=rewards, compression="gzip")
+                ep_group.create_dataset("dones", data=dones, compression="gzip")
+
+        file_size_mb = os.path.getsize(filepath) / (1024 * 1024)
+        print(f"Saved {len(episodes)} episodes to {filepath} ({file_size_mb:.1f} MB)")
 
     def _get_chunk_filename(self, base_filename: str, chunk_idx: int) -> str:
         """Generate filename for a chunk."""
@@ -718,6 +726,9 @@ class SequenceDataset(torch.utils.data.Dataset):
         rewards_seq = np.array(episode.rewards[start_idx:end_idx])
         dones_seq = np.array(episode.dones[start_idx:end_idx])
 
+        # Normalize uint8 [0, 255] to float32 [0, 1]
+        obs_seq = obs_seq.astype(np.float32) / 255.0
+
         # Convert to tensors
         return {
             "observations": torch.from_numpy(obs_seq)
@@ -770,9 +781,12 @@ class SequenceDataset(torch.utils.data.Dataset):
         rewards_seq = ep_group["rewards"][start_idx:end_idx]
         dones_seq = ep_group["dones"][start_idx:end_idx]
 
+        # Normalize uint8 [0, 255] to float32 [0, 1]
+        obs_seq = np.array(obs_seq).astype(np.float32) / 255.0
+
         # Convert to tensors
         return {
-            "observations": torch.from_numpy(np.array(obs_seq))
+            "observations": torch.from_numpy(obs_seq)
             .float()
             .permute(0, 3, 1, 2),  # (T, C, H, W)
             "actions": torch.from_numpy(np.array(actions_seq)).float(),
@@ -876,6 +890,8 @@ class ImageDataset(torch.utils.data.Dataset):
     def _get_memory_item(self, idx: int) -> torch.Tensor:
         """Get item from images in memory."""
         img = self.images[idx]
+        # Normalize uint8 [0, 255] to float32 [0, 1]
+        img = img.astype(np.float32) / 255.0
         return torch.from_numpy(img).float().permute(2, 0, 1)
 
     def _get_file_handle(self, file_idx: int) -> h5py.File:
@@ -912,8 +928,11 @@ class ImageDataset(torch.utils.data.Dataset):
         ep_name = ep_names[ep_idx_in_file]
         img = f[ep_name]["observations"][frame_idx]
 
+        # Normalize uint8 [0, 255] to float32 [0, 1]
+        img = np.array(img).astype(np.float32) / 255.0
+
         # Convert to tensor and permute to (C, H, W)
-        return torch.from_numpy(np.array(img)).float().permute(2, 0, 1)
+        return torch.from_numpy(img).float().permute(2, 0, 1)
 
     def __del__(self):
         """Close all file handles when dataset is destroyed."""

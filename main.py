@@ -14,21 +14,21 @@ from world_models import (
     DataCollector,
     ImageDataset,
     SequenceDataset,
+    VAELightningModule,
     VAETrainer,
     WorldModel,
     WorldModelAgentConfig,
-    WorldModelTrainer,
-    VAELightningModule,
     WorldModelLightningModule,
-    create_train_val_dataloaders,
+    WorldModelTrainer,
     create_sequence_train_val_dataloaders,
+    create_train_val_dataloaders,
 )
 
 
 def main():
     parser = argparse.ArgumentParser(description="Train World Model Agent")
     parser.add_argument(
-        "--config", type=str, default="config.yaml", help="Path to config file"
+        "--config", type=str, default="configs/config.yaml", help="Path to config file"
     )
     parser.add_argument(
         "--stage",
@@ -179,7 +179,7 @@ def collect_data(
 def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = False):
     """Train the FSQ-VAE using PyTorch Lightning."""
     import lightning as L
-    from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+    from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
 
     # Create dataset with lazy loading (don't load all episodes into memory)
@@ -212,17 +212,22 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     )
 
     # Create model and Lightning module
-    vae = FSQVAE(config.fsq_vae)
+    vae = FSQVAE(
+        config.fsq_vae,
+        use_perceptual_loss=config.fsq_vae.use_perceptual_loss,
+        device=config.training.device,
+    )
     lightning_module = VAELightningModule(vae, config)
 
     # Setup callbacks
     checkpoint_callback = ModelCheckpoint(
-        dirpath=config.training.checkpoint_dir,
-        filename="vae-{epoch:02d}-{val/loss:.4f}",
+        dirpath=os.path.join(config.training.checkpoint_dir, "vae"),
+        filename="epoch={epoch:02d}-val_loss={val/loss:.4f}",
         monitor="val/loss",
         mode="min",
         save_top_k=3,
         save_last=True,
+        auto_insert_metric_name=False,  # Don't auto-insert metric name
     )
 
     early_stopping = EarlyStopping(
@@ -252,16 +257,20 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     )
 
     # Train
-    print(f"Training VAE with Lightning (max {config.training.train_vae_epochs} epochs)...")
+    print(
+        f"Training VAE with Lightning (max {config.training.train_vae_epochs} epochs)..."
+    )
     print(f"  - {config.training.steps_per_epoch} batches per epoch")
     print(f"  - Subsample rate: 1/{config.training.subsample_rate}")
     print(f"  - Validation split: {config.training.val_split*100:.1f}%")
-    print(f"  - Early stopping patience: {config.training.early_stopping_patience} epochs")
+    print(
+        f"  - Early stopping patience: {config.training.early_stopping_patience} epochs"
+    )
     print(f"  - Checkpointing best models based on validation loss")
 
     ckpt_path = None
     if resume:
-        last_ckpt = os.path.join(config.training.checkpoint_dir, "last.ckpt")
+        last_ckpt = os.path.join(config.training.checkpoint_dir, "vae", "last.ckpt")
         if os.path.exists(last_ckpt):
             ckpt_path = last_ckpt
             print(f"Resuming from {ckpt_path}")
@@ -271,7 +280,11 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     print("\nVAE training completed!")
     print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
     print(f"\nTensorBoard logs saved to: {tb_logger.log_dir}")
-    print("To view logs, run: tensorboard --logdir={}/vae_logs".format(config.training.checkpoint_dir))
+    print(
+        "To view logs, run: tensorboard --logdir={}/vae_logs".format(
+            config.training.checkpoint_dir
+        )
+    )
 
     return vae
 
@@ -285,7 +298,7 @@ def train_world_model(
     print("=" * 50)
 
     import lightning as L
-    from lightning.pytorch.callbacks import ModelCheckpoint, EarlyStopping
+    from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
 
     # Create dataset with lazy loading (don't load all episodes into memory)
@@ -318,13 +331,34 @@ def train_world_model(
     )
 
     # Load trained VAE
-    vae = FSQVAE(config.fsq_vae)
+    vae = FSQVAE(
+        config.fsq_vae,
+        use_perceptual_loss=config.fsq_vae.use_perceptual_loss,
+        device=config.training.device,
+    )
 
     # Try loading from Lightning checkpoint first
-    vae_lightning_checkpoint = os.path.join(config.training.checkpoint_dir, "vae-last.ckpt")
-    vae_legacy_checkpoint = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
+    # Try last-v1.ckpt first (new architecture), then last.ckpt (could be old or new)
+    vae_lightning_checkpoint_v1 = os.path.join(
+        config.training.checkpoint_dir, "vae", "last-v1.ckpt"
+    )
+    vae_lightning_checkpoint = os.path.join(
+        config.training.checkpoint_dir, "vae", "last.ckpt"
+    )
+    vae_legacy_checkpoint = os.path.join(
+        config.training.checkpoint_dir, "vae_latest.pth"
+    )
 
-    if os.path.exists(vae_lightning_checkpoint):
+    if os.path.exists(vae_lightning_checkpoint_v1):
+        print(
+            f"Loading VAE from Lightning checkpoint (v1): {vae_lightning_checkpoint_v1}"
+        )
+        vae_module = VAELightningModule.load_from_checkpoint(
+            vae_lightning_checkpoint_v1, model=vae, config=config
+        )
+        vae = vae_module.model
+        print("Loaded trained VAE from Lightning checkpoint (v1)")
+    elif os.path.exists(vae_lightning_checkpoint):
         print(f"Loading VAE from Lightning checkpoint: {vae_lightning_checkpoint}")
         vae_module = VAELightningModule.load_from_checkpoint(
             vae_lightning_checkpoint, model=vae, config=config
@@ -333,6 +367,8 @@ def train_world_model(
         print("Loaded trained VAE from Lightning checkpoint")
     elif os.path.exists(vae_legacy_checkpoint):
         print(f"Loading VAE from legacy checkpoint: {vae_legacy_checkpoint}")
+        from src.world_models import VAETrainer
+
         vae_trainer = VAETrainer(vae, config)
         vae_trainer.load_checkpoint(vae_legacy_checkpoint)
         print("Loaded trained VAE from legacy checkpoint")
@@ -345,12 +381,13 @@ def train_world_model(
 
     # Setup callbacks
     checkpoint_callback = ModelCheckpoint(
-        dirpath=config.training.checkpoint_dir,
-        filename="world_model-{epoch:02d}-{val/loss:.4f}",
+        dirpath=os.path.join(config.training.checkpoint_dir, "world_model"),
+        filename="epoch={epoch:02d}-val_loss={val/loss:.4f}",
         monitor="val/loss",
         mode="min",
         save_top_k=3,
         save_last=True,
+        auto_insert_metric_name=False,  # Don't auto-insert metric name
     )
 
     early_stopping = EarlyStopping(
@@ -382,19 +419,25 @@ def train_world_model(
     # Determine checkpoint path for resuming
     ckpt_path = None
     if resume:
-        last_ckpt = os.path.join(config.training.checkpoint_dir, "world_model-last.ckpt")
+        last_ckpt = os.path.join(
+            config.training.checkpoint_dir, "world_model", "last.ckpt"
+        )
         if os.path.exists(last_ckpt):
             ckpt_path = last_ckpt
             print(f"Resuming world model training from {ckpt_path}")
 
     # Train
-    print("Training World Model with Lightning (max {} epochs)...".format(
-        config.training.train_world_model_epochs
-    ))
+    print(
+        "Training World Model with Lightning (max {} epochs)...".format(
+            config.training.train_world_model_epochs
+        )
+    )
     print(f"  - {config.training.world_model_steps_per_epoch} batches per epoch")
     print(f"  - Sequence length: {config.world_model.sequence_length}")
     print(f"  - Validation split: {config.training.val_split*100:.1f}%")
-    print(f"  - Early stopping patience: {config.training.early_stopping_patience} epochs")
+    print(
+        f"  - Early stopping patience: {config.training.early_stopping_patience} epochs"
+    )
     print(f"  - Checkpointing best models based on validation loss")
 
     trainer.fit(lightning_module, train_loader, val_loader, ckpt_path=ckpt_path)
@@ -402,15 +445,22 @@ def train_world_model(
     print("\nWorld model training completed!")
     print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
     print(f"\nTensorBoard logs saved to: {tb_logger.log_dir}")
-    print("To view logs, run: tensorboard --logdir={}/world_model_logs".format(config.training.checkpoint_dir))
+    print(
+        "To view logs, run: tensorboard --logdir={}/world_model_logs".format(
+            config.training.checkpoint_dir
+        )
+    )
 
     return world_model
 
 
 def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     """Train the controller."""
+    device = config.training.device
     # Load trained models
-    vae = FSQVAE(config.fsq_vae)
+    vae = FSQVAE(
+        config.fsq_vae, use_perceptual_loss=False, device=device
+    )  # No perceptual loss needed for inference
     world_model = WorldModel(config.world_model)
 
     vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
@@ -470,8 +520,11 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
 
     from world_models import EvolutionaryController
 
+    device = config.training.device
     # Load trained models
-    vae = FSQVAE(config.fsq_vae)
+    vae = FSQVAE(
+        config.fsq_vae, use_perceptual_loss=False, device=device
+    )  # No perceptual loss needed for inference
     controller = EvolutionaryController(config.controller)
 
     # Load checkpoints
@@ -501,9 +554,13 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
     # Use configured device, validate it's available
     device_str = config.training.device
     if device_str == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError("CUDA device requested but CUDA is not available on this system")
+        raise RuntimeError(
+            "CUDA device requested but CUDA is not available on this system"
+        )
     elif device_str == "mps" and not torch.backends.mps.is_available():
-        raise RuntimeError("MPS device requested but MPS is not available on this system")
+        raise RuntimeError(
+            "MPS device requested but MPS is not available on this system"
+        )
     device = torch.device(device_str)
     vae.to(device).eval()
     controller.to(device).eval()
