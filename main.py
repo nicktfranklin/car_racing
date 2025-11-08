@@ -247,17 +247,29 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     import lightning as L
     from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
+    from src.world_models.lightning_training import ChunkRotationCallback
 
     # Create dataset with lazy loading (don't load all episodes into memory)
     collector = DataCollector(config.data)
     chunk_files = collector.get_chunk_files(data_file)
 
     if chunk_files:
-        # Use lazy loading for chunked data with subsampling
+        # Get chunk group parameters from config (with defaults)
+        chunk_group_size = getattr(config.training, 'chunk_group_size', 5)
+        epochs_per_phase = getattr(config.training, 'epochs_per_phase', 3)
+
+        # Calculate base chunk size (images per base chunk)
+        # This will be multiplied by chunk_group_size to get total RAM usage
+        images_per_chunk = config.training.steps_per_epoch * config.training.batch_size * 2
+
+        # Use chunked loading with chunk groups for large datasets
         dataset = ImageDataset(
             data_dir=config.data.data_dir,
             chunk_files=chunk_files,
             subsample_rate=config.training.subsample_rate,
+            chunk_group_size=chunk_group_size,
+            epochs_per_phase=epochs_per_phase,
+            images_per_chunk=images_per_chunk,
         )
     else:
         # Fallback to loading episodes for backward compatibility
@@ -267,10 +279,13 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     # Create train/val dataloaders with random sampling
     pin_memory = config.training.device == "cuda"
 
+    # Use num_workers=0 for chunked loading (data already in RAM, avoid multiprocessing overhead)
+    num_workers = 0 if (hasattr(dataset, 'use_chunking') and dataset.use_chunking) else config.training.num_dataloader_workers
+
     train_loader, val_loader = create_train_val_dataloaders(
         dataset=dataset,
         batch_size=config.training.batch_size,
-        num_workers=config.training.num_dataloader_workers,
+        num_workers=num_workers,
         val_split=config.training.val_split,
         train_samples_per_epoch=config.training.steps_per_epoch,
         val_samples=config.training.val_samples,
@@ -303,6 +318,15 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
         verbose=True,
     )
 
+    # Build callbacks list
+    callbacks = [checkpoint_callback, early_stopping]
+
+    # Add chunk rotation callback if using chunked loading
+    if hasattr(dataset, 'use_chunking') and dataset.use_chunking:
+        epochs_per_phase = getattr(config.training, 'epochs_per_phase', 3)
+        callbacks.append(ChunkRotationCallback(epochs_per_phase=epochs_per_phase))
+        print(f"  - Chunk rotation enabled: rotating every {epochs_per_phase} epochs")
+
     # Setup TensorBoard logger
     tb_logger = TensorBoardLogger(
         save_dir=config.training.checkpoint_dir,
@@ -313,7 +337,7 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     # Create trainer
     trainer = L.Trainer(
         max_epochs=config.training.train_vae_epochs,
-        callbacks=[checkpoint_callback, early_stopping],
+        callbacks=callbacks,
         logger=tb_logger,
         accelerator="auto",
         devices=1,

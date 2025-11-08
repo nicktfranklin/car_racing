@@ -307,6 +307,41 @@ class WorldModelLightningModule(L.LightningModule):
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
 
 
+class ChunkRotationCallback(L.Callback):
+    """Rotates chunk groups every N epochs for multi-chunk random sampling.
+
+    This callback enables efficient random sampling from large datasets by:
+    1. Loading multiple chunks into RAM (e.g., 5 chunks = 640K images)
+    2. Using RandomSampler to sample from this in-memory pool for N epochs
+    3. Rotating to the next chunk group every N epochs
+
+    This balances memory efficiency with true random sampling.
+    """
+
+    def __init__(self, epochs_per_phase: int = 3):
+        """
+        Args:
+            epochs_per_phase: How many epochs to use each chunk group before rotating
+        """
+        super().__init__()
+        self.epochs_per_phase = epochs_per_phase
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        """Called at the end of each training epoch."""
+        # Check if it's time to rotate (every epochs_per_phase epochs)
+        if (trainer.current_epoch + 1) % self.epochs_per_phase == 0:
+            # Access the dataset (accounting for Subset wrapper from train/val split)
+            train_dataloader = trainer.train_dataloader
+            if hasattr(train_dataloader, 'dataset'):
+                dataset = train_dataloader.dataset
+                # Unwrap Subset to get the underlying dataset
+                if hasattr(dataset, 'dataset'):
+                    dataset = dataset.dataset
+                # Call rotation method if available
+                if hasattr(dataset, 'rotate_to_next_chunk_group'):
+                    dataset.rotate_to_next_chunk_group()
+
+
 def worker_init_fn(worker_id):
     """Initialize worker with file sharding to reduce memory usage.
 

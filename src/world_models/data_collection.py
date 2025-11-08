@@ -852,28 +852,47 @@ class ImageDataset(torch.utils.data.Dataset):
         data_dir: str = None,
         chunk_files: List[str] = None,
         subsample_rate: int = 1,
+        chunk_group_size: int = 5,
+        epochs_per_phase: int = 3,
+        images_per_chunk: int = None,
     ):
         """
         Args:
             episodes: Pre-loaded episodes (legacy mode, loads all into memory)
-            data_dir: Directory containing chunk files (for lazy loading)
-            chunk_files: List of chunk filenames to load from (for lazy loading)
+            data_dir: Directory containing chunk files (for lazy/chunked loading)
+            chunk_files: List of chunk filenames to load from
             subsample_rate: Only use every Nth image (default 1 = use all)
+            chunk_group_size: Number of chunks to load together (for chunked mode)
+            epochs_per_phase: How many epochs to use each chunk group before rotating
+            images_per_chunk: Target images per base chunk (auto-calculated if None)
         """
         self.data_dir = data_dir
         self.chunk_files = chunk_files
         self.lazy_load = data_dir is not None and chunk_files is not None
         self.subsample_rate = subsample_rate
+        self.chunk_group_size = chunk_group_size
+        self.epochs_per_phase = epochs_per_phase
 
         # Cache for HDF5 file handles (process-local for DataLoader workers)
         # Note: initialized as empty dict, no lock needed since each worker has its own process
         self._file_handles = {}
 
         if self.lazy_load:
-            # Lazy loading mode: build index without loading images
+            # Build index first
             self._build_lazy_index()
+
+            # Auto-enable chunked mode for large datasets
+            should_use_chunking = len(chunk_files) > 50 or len(self.image_indices) > 1_000_000
+
+            if should_use_chunking and images_per_chunk is not None:
+                # Enable chunked loading with chunk groups
+                self._init_chunked_loading(images_per_chunk)
+            else:
+                # Use lazy loading (on-demand HDF5 access)
+                self.use_chunking = False
         else:
             # Legacy mode: load all images into memory
+            self.use_chunking = False
             self._build_memory_dataset(episodes if episodes is not None else [])
 
     def _build_memory_dataset(self, episodes: List[Episode]):
@@ -912,6 +931,101 @@ class ImageDataset(torch.utils.data.Dataset):
                 f"Created lazy image dataset with {total_images} images across {len(self.chunk_files)} files"
             )
 
+    def _init_chunked_loading(self, images_per_chunk: int):
+        """Initialize chunked loading with multi-chunk groups.
+
+        Args:
+            images_per_chunk: Base chunk size (will be multiplied by chunk_group_size)
+        """
+        import math
+
+        self.use_chunking = True
+        self.base_chunk_size = images_per_chunk
+
+        # Calculate how many base chunks we have total
+        self.num_base_chunks = math.ceil(len(self.image_indices) / self.base_chunk_size)
+
+        # Calculate how many chunk groups we have
+        self.total_chunk_groups = math.ceil(self.num_base_chunks / self.chunk_group_size)
+
+        # Track current phase (which chunk group we're on)
+        self.current_phase = 0
+
+        # Current chunk group in RAM
+        self.current_chunk_images = None
+        self.current_chunk_start_idx = 0
+        self.current_chunk_end_idx = 0
+
+        # Load first chunk group
+        self._load_chunk_group(0)
+
+        print(f"Chunked mode: Loading chunk groups of {self.chunk_group_size} base chunks")
+        print(f"  Total: {self.total_chunk_groups} chunk groups ({self.num_base_chunks} base chunks)")
+        print(f"  Rotation: Every {self.epochs_per_phase} epochs")
+
+    def _load_chunk_group(self, phase_num: int):
+        """Load a group of chunks into RAM.
+
+        Args:
+            phase_num: Which chunk group to load (0-indexed)
+        """
+        # Calculate which base chunks belong to this group
+        start_base_chunk = phase_num * self.chunk_group_size
+        end_base_chunk = min(start_base_chunk + self.chunk_group_size, self.num_base_chunks)
+
+        # Calculate image index range
+        start_idx = start_base_chunk * self.base_chunk_size
+        end_idx = min(end_base_chunk * self.base_chunk_size, len(self.image_indices))
+        chunk_size = end_idx - start_idx
+
+        # Preallocate array for chunk group
+        chunk_images = np.empty((chunk_size, 64, 64, 3), dtype=np.uint8)
+
+        # Load images sequentially from HDF5 files
+        current_file = None
+        current_file_handle = None
+
+        for i, idx in enumerate(range(start_idx, end_idx)):
+            file_idx, ep_idx, frame_idx = self.image_indices[idx]
+
+            # Open file if different from last
+            if current_file != file_idx:
+                if current_file_handle is not None:
+                    current_file_handle.close()
+                filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+                current_file_handle = h5py.File(filepath, "r")
+                current_file = file_idx
+
+            # Load image
+            ep_names = sorted([k for k in current_file_handle.keys() if k.startswith("episode_")])
+            ep_name = ep_names[ep_idx]
+            chunk_images[i] = current_file_handle[ep_name]["observations"][frame_idx]
+
+        if current_file_handle is not None:
+            current_file_handle.close()
+
+        # Store chunk group
+        self.current_chunk_images = chunk_images
+        self.current_chunk_start_idx = start_idx
+        self.current_chunk_end_idx = end_idx
+
+        # Calculate size in MB
+        size_mb = chunk_size * 64 * 64 * 3 / 1024 / 1024
+        print(f"Loaded chunk group {phase_num}/{self.total_chunk_groups}: images {start_idx:,} to {end_idx:,} ({chunk_size:,} images, {size_mb:.1f} MB)")
+
+    def rotate_to_next_chunk_group(self):
+        """Rotate to next chunk group. Called by Lightning callback every N epochs."""
+        if not self.use_chunking:
+            return
+
+        # Advance to next phase (wrap around to 0 after last group)
+        self.current_phase = (self.current_phase + 1) % self.total_chunk_groups
+
+        # Load the next chunk group
+        self._load_chunk_group(self.current_phase)
+
+        print(f"✓ Rotated to chunk group {self.current_phase}/{self.total_chunk_groups}")
+
     def set_worker_shard(self, worker_id: int, num_workers: int):
         """Set worker sharding info for file handle caching.
 
@@ -928,7 +1042,9 @@ class ImageDataset(torch.utils.data.Dataset):
             return len(self.images)
 
     def __getitem__(self, idx: int) -> torch.Tensor:
-        if self.lazy_load:
+        if self.use_chunking:
+            return self._get_chunked_item(idx)
+        elif self.lazy_load:
             return self._get_lazy_item(idx)
         else:
             return self._get_memory_item(idx)
@@ -936,6 +1052,30 @@ class ImageDataset(torch.utils.data.Dataset):
     def _get_memory_item(self, idx: int) -> torch.Tensor:
         """Get item from images in memory."""
         img = self.images[idx]
+        # Normalize uint8 [0, 255] to float32 [0, 1]
+        img = img.astype(np.float32) / 255.0
+        return torch.from_numpy(img).float().permute(2, 0, 1)
+
+    def _get_chunked_item(self, idx: int) -> torch.Tensor:
+        """Get item from current chunk group in RAM.
+
+        RandomSampler can access any index in the current chunk group.
+        Rotation to next chunk group happens at epoch boundaries via callback.
+        """
+        # Calculate local index within current chunk
+        local_idx = idx - self.current_chunk_start_idx
+
+        # Sanity check: ensure index is within current chunk group
+        if local_idx < 0 or local_idx >= len(self.current_chunk_images):
+            # This shouldn't happen if RandomSampler is configured correctly
+            # But if it does, fall back to lazy loading
+            print(f"Warning: Index {idx} outside current chunk range [{self.current_chunk_start_idx}, {self.current_chunk_end_idx})")
+            print(f"  Falling back to lazy loading for this sample")
+            return self._get_lazy_item(idx)
+
+        # Get image from RAM
+        img = self.current_chunk_images[local_idx]
+
         # Normalize uint8 [0, 255] to float32 [0, 1]
         img = img.astype(np.float32) / 255.0
         return torch.from_numpy(img).float().permute(2, 0, 1)

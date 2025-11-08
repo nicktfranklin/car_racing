@@ -267,7 +267,15 @@ class TrainingConfig(BaseModel):
         default=4, description="Number of dataloader workers"
     )
     subsample_rate: int = Field(
-        default=4, description="Subsample rate for image dataset (use every Nth frame)"
+        default=1, description="Subsample rate for image dataset (use every Nth frame)"
+    )
+
+    # Chunked loading parameters (for memory-efficient random sampling)
+    chunk_group_size: int = Field(
+        default=5, description="Number of chunks to load together for chunked mode"
+    )
+    epochs_per_phase: int = Field(
+        default=3, description="How many epochs to use each chunk group before rotating"
     )
 
     # World Model specific parameters
