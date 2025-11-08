@@ -109,10 +109,10 @@ data:
 training:
   device: cuda
   batch_size: 128  # Slightly smaller batch for transformer (uses more memory)
-  num_epochs: 100
-  train_vae_epochs: 100
-  train_world_model_epochs: 50
-  train_controller_epochs: 100
+  num_epochs: 1_000
+  train_vae_epochs: 1_000
+  train_world_model_epochs: 1_000
+  train_controller_epochs: 1_000
 
   # Lightning training parameters - VAE
   steps_per_epoch: 100
