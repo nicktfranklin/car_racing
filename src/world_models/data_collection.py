@@ -740,24 +740,38 @@ class SequenceDataset(torch.utils.data.Dataset):
         }
 
     def _get_file_handle(self, file_idx: int) -> h5py.File:
-        """Get cached file handle for the given file index.
+        """Get file handle with minimal caching to save RAM.
 
-        Uses process-level caching to avoid reopening files repeatedly.
-        Each worker process maintains its own cache.
+        With 200+ chunk files, caching all handles uses too much memory.
+        Instead, we keep only the most recently used file open.
         """
         import os
 
-        pid = os.getpid()  # Get current process ID for worker isolation
+        filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+
+        # Only cache the single most recent file handle to minimize memory
+        pid = os.getpid()
         cache_key = (pid, file_idx)
 
+        # If this is a different file than last time, close the old one
+        if len(self._file_handles) > 0:
+            cached_keys = list(self._file_handles.keys())
+            for old_key in cached_keys:
+                if old_key != cache_key:
+                    try:
+                        self._file_handles[old_key].close()
+                    except:
+                        pass
+                    del self._file_handles[old_key]
+
+        # Open the file if not already cached
         if cache_key not in self._file_handles:
-            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-            # Open with minimal cache to prevent memory leaks
+            # Open with ZERO cache to minimize memory (rely on OS caching)
             self._file_handles[cache_key] = h5py.File(
                 filepath,
                 "r",
-                rdcc_nbytes=16 * 1024 * 1024,  # 16MB cache per file (reduced from 512MB to prevent OOM)
-                rdcc_nslots=5000,  # Reduced from 20000
+                rdcc_nbytes=0,  # Zero cache - let OS handle it
+                rdcc_nslots=1,
             )
 
         return self._file_handles[cache_key]
@@ -898,24 +912,38 @@ class ImageDataset(torch.utils.data.Dataset):
         return torch.from_numpy(img).float().permute(2, 0, 1)
 
     def _get_file_handle(self, file_idx: int) -> h5py.File:
-        """Get cached file handle for the given file index.
+        """Get file handle with minimal caching to save RAM.
 
-        Uses process-level caching to avoid reopening files repeatedly.
-        Each worker process maintains its own cache.
+        With 200+ chunk files, caching all handles uses too much memory.
+        Instead, we keep only the most recently used file open.
         """
         import os
 
-        pid = os.getpid()  # Get current process ID for worker isolation
+        filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+
+        # Only cache the single most recent file handle to minimize memory
+        pid = os.getpid()
         cache_key = (pid, file_idx)
 
+        # If this is a different file than last time, close the old one
+        if len(self._file_handles) > 0:
+            cached_keys = list(self._file_handles.keys())
+            for old_key in cached_keys:
+                if old_key != cache_key:
+                    try:
+                        self._file_handles[old_key].close()
+                    except:
+                        pass
+                    del self._file_handles[old_key]
+
+        # Open the file if not already cached
         if cache_key not in self._file_handles:
-            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-            # Open with minimal cache to prevent memory leaks
+            # Open with ZERO cache to minimize memory (rely on OS caching)
             self._file_handles[cache_key] = h5py.File(
                 filepath,
                 "r",
-                rdcc_nbytes=16 * 1024 * 1024,  # 16MB cache per file (reduced from 512MB to prevent OOM)
-                rdcc_nslots=5000,  # Reduced from 20000
+                rdcc_nbytes=0,  # Zero cache - let OS handle it
+                rdcc_nslots=1,
             )
 
         return self._file_handles[cache_key]
