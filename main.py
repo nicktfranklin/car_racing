@@ -4,6 +4,8 @@ Main training pipeline for World Model agent.
 
 import argparse
 import os
+import sys
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -23,6 +25,53 @@ from world_models import (
     create_sequence_train_val_dataloaders,
     create_train_val_dataloaders,
 )
+
+
+class TeeOutput:
+    """Write to both file and original stream (stdout/stderr)."""
+
+    def __init__(self, file_path, original_stream):
+        self.file = open(file_path, 'a', buffering=1)  # Line buffered
+        self.original = original_stream
+
+    def write(self, data):
+        self.file.write(data)
+        self.original.write(data)
+
+    def flush(self):
+        self.file.flush()
+        self.original.flush()
+
+    def close(self):
+        self.file.close()
+
+
+def setup_logging(log_file):
+    """Redirect stdout and stderr to both console and file."""
+    if log_file is None:
+        return None, None
+
+    # Create log directory if needed
+    log_dir = os.path.dirname(log_file)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    # Add timestamp header to log file
+    with open(log_file, 'a') as f:
+        f.write(f"\n{'='*80}\n")
+        f.write(f"Training started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*80}\n\n")
+
+    # Redirect stdout and stderr
+    stdout_tee = TeeOutput(log_file, sys.stdout)
+    stderr_tee = TeeOutput(log_file, sys.stderr)
+
+    sys.stdout = stdout_tee
+    sys.stderr = stderr_tee
+
+    print(f"Logging to file: {log_file}")
+
+    return stdout_tee, stderr_tee
 
 
 def main():
@@ -81,6 +130,12 @@ def main():
         default=50,
         help="Save checkpoint every N episodes during data collection",
     )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Optional file to log stdout/stderr (overrides config)",
+    )
     args = parser.parse_args()
 
     # Load configuration
@@ -93,6 +148,10 @@ def main():
     else:
         config = WorldModelAgentConfig()
         print(f"Using default config")
+
+    # Set up logging to file (command line overrides config)
+    log_file = args.log_file if args.log_file is not None else config.training.log_file
+    stdout_tee, stderr_tee = setup_logging(log_file)
 
     # Set device
     if args.device is not None:
@@ -159,6 +218,13 @@ def main():
         train_controller(config, args.resume)
 
     print("\nTraining pipeline completed!")
+
+    # Clean up logging
+    if stdout_tee is not None:
+        sys.stdout = stdout_tee.original
+        sys.stderr = stderr_tee.original
+        stdout_tee.close()
+        stderr_tee.close()
 
 
 def collect_data(

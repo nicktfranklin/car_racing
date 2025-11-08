@@ -292,6 +292,9 @@ class TrainingConfig(BaseModel):
     checkpoint_dir: str = Field(
         default="./checkpoints", description="Checkpoint directory"
     )
+    log_file: Optional[str] = Field(
+        default=None, description="Optional file to log stdout/stderr (None = no file logging)"
+    )
 
 
 class WorldModelAgentConfig(BaseModel):
