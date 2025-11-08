@@ -7,7 +7,7 @@ import multiprocessing as mp
 import os
 import time
 import warnings
-from concurrent.futures import ProcessPoolExecutor, as_completed, wait, FIRST_COMPLETED
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
 from typing import Dict, List, Optional, Tuple
 
 import gymnasium as gym
@@ -17,8 +17,8 @@ import torch
 from tqdm import tqdm
 
 # Suppress warnings
-warnings.filterwarnings('ignore')
-os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+warnings.filterwarnings("ignore")
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 
 try:
     from .config import DataConfig
@@ -71,12 +71,12 @@ def collect_episodes_worker(
     args: Tuple[str, Optional[str], int, int, int],
 ) -> List[Episode]:
     """Worker function for parallel episode collection."""
-    import warnings
     import os
+    import warnings
 
     # Suppress all warnings in worker processes
-    warnings.filterwarnings('ignore')
-    os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+    warnings.filterwarnings("ignore")
+    os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 
     env_name, render_mode, num_episodes, max_episode_length, worker_id = args
 
@@ -84,7 +84,9 @@ def collect_episodes_worker(
     if render_mode is None:
         env = gym.make(env_name, max_episode_steps=max_episode_length)
     else:
-        env = gym.make(env_name, render_mode=render_mode, max_episode_steps=max_episode_length)
+        env = gym.make(
+            env_name, render_mode=render_mode, max_episode_steps=max_episode_length
+        )
     agent = RandomAgent(env.action_space)
     episodes = []
 
@@ -98,7 +100,9 @@ def collect_episodes_worker(
         # Preprocess observation - keep as uint8 for efficient storage
         from skimage.transform import resize
 
-        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(np.uint8)
+        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(
+            np.uint8
+        )
 
         for step in range(max_episode_length):
             action = agent.get_action(obs)
@@ -173,7 +177,7 @@ class DataCollector:
             desc="Collecting episodes",
             unit="ep",
             ncols=100,
-            bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]'
+            bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
         ) as pbar:
             while episodes_collected < remaining:
                 # Determine chunk size
@@ -214,7 +218,9 @@ class DataCollector:
         if num_episodes < 20 or num_workers == 1:
             return self._collect_episodes_sequential_with_pbar(num_episodes, pbar)
         else:
-            return self._collect_episodes_parallel_with_pbar(num_episodes, num_workers, pbar)
+            return self._collect_episodes_parallel_with_pbar(
+                num_episodes, num_workers, pbar
+            )
 
     def _collect_episodes_no_checkpoint(
         self, num_episodes: int, existing_count: int = 0, total_episodes: int = None
@@ -300,7 +306,7 @@ class DataCollector:
     ) -> List[Episode]:
         """Parallel episode collection with external progress bar - memory efficient."""
         # OPTIMIZATION: Batch multiple episodes per worker to reduce process spawning overhead
-        episodes_per_batch = getattr(self.config, 'episodes_per_batch', 10)
+        episodes_per_batch = getattr(self.config, "episodes_per_batch", 10)
 
         start_time = time.time()
         all_episodes = []
@@ -374,7 +380,7 @@ class DataCollector:
     ) -> List[Episode]:
         """Parallel episode collection using multiprocessing - memory efficient."""
         # OPTIMIZATION: Batch multiple episodes per worker to reduce process spawning overhead
-        episodes_per_batch = getattr(self.config, 'episodes_per_batch', 10)
+        episodes_per_batch = getattr(self.config, "episodes_per_batch", 10)
 
         start_time = time.time()
         all_episodes = []
@@ -397,7 +403,9 @@ class DataCollector:
                 episode_id = 0
 
                 # Submit initial batch
-                while episode_id < min(max_in_flight * episodes_per_batch, num_episodes):
+                while episode_id < min(
+                    max_in_flight * episodes_per_batch, num_episodes
+                ):
                     remaining = num_episodes - episode_id
                     batch_size = min(episodes_per_batch, remaining)
 
@@ -477,7 +485,9 @@ class DataCollector:
 
         # Resize from 96x96 to 64x64 and keep as uint8 [0, 255]
         # Don't normalize to [0, 1] - that happens at load time
-        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(np.uint8)
+        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(
+            np.uint8
+        )
 
         return obs
 
@@ -500,7 +510,7 @@ class DataCollector:
                     data=obs,
                     compression="gzip",
                     compression_opts=4,
-                    chunks=(1, 64, 64, 3)  # Optimize for frame-level access
+                    chunks=(1, 64, 64, 3),  # Optimize for frame-level access
                 )
 
                 # Add compression to other datasets too
@@ -511,14 +521,15 @@ class DataCollector:
     def _get_chunk_filename(self, base_filename: str, chunk_idx: int) -> str:
         """Generate filename for a chunk."""
         # Remove extension if present
-        if base_filename.endswith('.h5'):
+        if base_filename.endswith(".h5"):
             base_filename = base_filename[:-3]
         return f"{base_filename}_chunk_{chunk_idx:04d}.h5"
 
     def _parse_chunk_filename(self, filename: str) -> int:
         """Extract chunk index from filename. Returns -1 if not a chunk file."""
         import re
-        match = re.search(r'_chunk_(\d+)\.h5$', filename)
+
+        match = re.search(r"_chunk_(\d+)\.h5$", filename)
         if match:
             return int(match.group(1))
         return -1
@@ -541,7 +552,7 @@ class DataCollector:
         import glob
 
         # Remove extension if present
-        if base_filename.endswith('.h5'):
+        if base_filename.endswith(".h5"):
             base_filename = base_filename[:-3]
 
         # Find all chunk files
@@ -560,7 +571,7 @@ class DataCollector:
         import glob
 
         # Remove extension if present
-        if base_filename.endswith('.h5'):
+        if base_filename.endswith(".h5"):
             base_filename = base_filename[:-3]
 
         # Find all chunk files
@@ -581,7 +592,9 @@ class DataCollector:
             for chunk_file in chunk_files:
                 episodes = self._load_single_file(chunk_file)
                 all_episodes.extend(episodes)
-            print(f"Loaded {len(all_episodes)} episodes total from {len(chunk_files)} files")
+            print(
+                f"Loaded {len(all_episodes)} episodes total from {len(chunk_files)} files"
+            )
             return all_episodes
         else:
             # Try loading single file (backward compatibility)
@@ -641,7 +654,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         self.include_initial_frame = include_initial_frame
         self.data_dir = data_dir
         self.chunk_files = chunk_files
-        self.lazy_load = (data_dir is not None and chunk_files is not None)
+        self.lazy_load = data_dir is not None and chunk_files is not None
 
         # Cache for HDF5 file handles (process-local for DataLoader workers)
         self._file_handles = {}
@@ -733,6 +746,7 @@ class SequenceDataset(torch.utils.data.Dataset):
         Each worker process maintains its own cache.
         """
         import os
+
         pid = os.getpid()  # Get current process ID for worker isolation
         cache_key = (pid, file_idx)
 
@@ -740,9 +754,10 @@ class SequenceDataset(torch.utils.data.Dataset):
             filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
             # Open with large cache for better performance
             self._file_handles[cache_key] = h5py.File(
-                filepath, "r",
-                rdcc_nbytes=512*1024*1024,  # 512MB cache per file
-                rdcc_nslots=20000
+                filepath,
+                "r",
+                rdcc_nbytes=512 * 1024 * 1024,  # 512MB cache per file
+                rdcc_nslots=20000,
             )
 
         return self._file_handles[cache_key]
@@ -812,7 +827,7 @@ class ImageDataset(torch.utils.data.Dataset):
         """
         self.data_dir = data_dir
         self.chunk_files = chunk_files
-        self.lazy_load = (data_dir is not None and chunk_files is not None)
+        self.lazy_load = data_dir is not None and chunk_files is not None
         self.subsample_rate = subsample_rate
 
         # Cache for HDF5 file handles (process-local for DataLoader workers)
@@ -888,6 +903,7 @@ class ImageDataset(torch.utils.data.Dataset):
         Each worker process maintains its own cache.
         """
         import os
+
         pid = os.getpid()  # Get current process ID for worker isolation
         cache_key = (pid, file_idx)
 
@@ -895,9 +911,10 @@ class ImageDataset(torch.utils.data.Dataset):
             filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
             # Open with large cache for better performance
             self._file_handles[cache_key] = h5py.File(
-                filepath, "r",
-                rdcc_nbytes=512*1024*1024,  # 512MB cache per file
-                rdcc_nslots=20000
+                filepath,
+                "r",
+                rdcc_nbytes=512 * 1024 * 1024,  # 512MB cache per file
+                rdcc_nslots=20000,
             )
 
         return self._file_handles[cache_key]
