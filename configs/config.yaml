@@ -116,18 +116,22 @@ training:
 
   # Lightning training parameters - VAE
   steps_per_epoch: 500
-  val_samples: 200  # Reduced from 500 to save RAM
+  val_samples: 200
   val_split: 0.05
   early_stopping_patience: 10
-  num_dataloader_workers: 8  # Only used for lazy loading (chunked uses 0)
-  subsample_rate: 1  # Use all images (no subsampling needed with chunked loading)
+  num_dataloader_workers: 0  # Sequential chunk loading uses 0
 
-  # Chunked loading parameters (for memory-efficient random sampling)
-  chunk_group_size: 5  # Load 5 chunks together (~640K images, 7.5GB RAM)
-  epochs_per_phase: 3  # Rotate to new chunk group every 3 epochs
+  # VAE dataset parameters (sequential loading with subsampling)
+  vae_subsample_rate: 10  # Use every 10th frame for decorrelation
+  vae_files_per_chunk: 5  # Load 5 files at a time (~500K images, ~6GB)
+
+  # World Model dataset parameters (sequential loading with subsampling)
+  world_model_subsample_rate: 4  # Use every 4th frame
+  world_model_files_per_chunk: 5  # Load 5 files at a time (~6GB)
+  world_model_sequence_length: 64  # Sequence length for transformer
 
   # Lightning training parameters - World Model
-  world_model_batch_size: 64  # Increased from 32 for better GPU utilization
+  world_model_batch_size: 32  # Smaller due to sequences
   world_model_steps_per_epoch: 200
   world_model_val_samples: 200
 

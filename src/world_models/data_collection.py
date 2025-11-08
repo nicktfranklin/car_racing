@@ -1159,6 +1159,289 @@ class ImageDataset(torch.utils.data.Dataset):
                 pass
 
 
+class VAEDataset(torch.utils.data.Dataset):
+    """Sequential dataset for VAE training with subsampling.
+
+    Loads chunks of files sequentially into memory for efficient I/O.
+    Subsample rate reduces autocorrelation between training images.
+    """
+
+    def __init__(
+        self,
+        data_dir: str,
+        chunk_files: List[str],
+        subsample_rate: int = 10,
+        files_per_chunk: int = 5,
+    ):
+        """
+        Args:
+            data_dir: Directory containing HDF5 chunk files
+            chunk_files: List of chunk filenames to load from
+            subsample_rate: Use every Nth frame (default 10 for decorrelation)
+            files_per_chunk: Number of files to load at once (default 5 = ~6GB)
+        """
+        self.data_dir = data_dir
+        self.chunk_files = chunk_files
+        self.subsample_rate = subsample_rate
+        self.files_per_chunk = files_per_chunk
+
+        # Build index of all images
+        self._build_index()
+
+        # Chunked loading state
+        self.current_chunk_idx = 0
+        self.num_chunks = (len(chunk_files) + files_per_chunk - 1) // files_per_chunk
+        self.current_images = None
+
+        # Load first chunk
+        self._load_chunk(0)
+
+    def _build_index(self):
+        """Build index of subsampled images across all files."""
+        self.image_indices = []  # List of (file_idx, ep_idx_in_file, frame_idx)
+
+        total_frames = 0
+        subsampled_frames = 0
+
+        for file_idx, chunk_file in enumerate(self.chunk_files):
+            filepath = os.path.join(self.data_dir, chunk_file)
+            with h5py.File(filepath, "r") as f:
+                ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+                for ep_idx_in_file, ep_name in enumerate(ep_names):
+                    num_frames = len(f[ep_name]["observations"])
+                    for frame_idx in range(0, num_frames, self.subsample_rate):
+                        self.image_indices.append((file_idx, ep_idx_in_file, frame_idx))
+                        subsampled_frames += 1
+                    total_frames += num_frames
+
+        print(f"VAE Dataset: {subsampled_frames:,} images from {total_frames:,} total (subsample rate: 1/{self.subsample_rate})")
+        print(f"  {len(self.chunk_files)} files → {self.num_chunks} chunks of {self.files_per_chunk} files")
+
+    def _load_chunk(self, chunk_idx: int):
+        """Load a chunk of files into memory."""
+        # Calculate which files belong to this chunk
+        start_file = chunk_idx * self.files_per_chunk
+        end_file = min(start_file + self.files_per_chunk, len(self.chunk_files))
+
+        # Calculate image indices for this chunk
+        start_img_idx = None
+        end_img_idx = None
+        for i, (file_idx, _, _) in enumerate(self.image_indices):
+            if file_idx >= start_file and start_img_idx is None:
+                start_img_idx = i
+            if file_idx >= end_file:
+                end_img_idx = i
+                break
+
+        if start_img_idx is None:
+            start_img_idx = 0
+        if end_img_idx is None:
+            end_img_idx = len(self.image_indices)
+
+        chunk_size = end_img_idx - start_img_idx
+
+        # Pre-allocate array
+        chunk_images = np.empty((chunk_size, 64, 64, 3), dtype=np.uint8)
+
+        # Load images sequentially
+        current_file = None
+        current_file_handle = None
+
+        for i, idx in enumerate(range(start_img_idx, end_img_idx)):
+            file_idx, ep_idx, frame_idx = self.image_indices[idx]
+
+            # Open new file if needed
+            if current_file != file_idx:
+                if current_file_handle is not None:
+                    current_file_handle.close()
+                filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+                current_file_handle = h5py.File(filepath, "r")
+                current_file = file_idx
+
+            # Load image
+            ep_names = sorted([k for k in current_file_handle.keys() if k.startswith("episode_")])
+            ep_name = ep_names[ep_idx]
+            chunk_images[i] = current_file_handle[ep_name]["observations"][frame_idx]
+
+        if current_file_handle is not None:
+            current_file_handle.close()
+
+        # Store chunk
+        self.current_images = chunk_images
+        self.current_chunk_idx = chunk_idx
+        self.chunk_start_idx = start_img_idx
+        self.chunk_end_idx = end_img_idx
+
+        size_mb = chunk_size * 64 * 64 * 3 / (1024 * 1024)
+        print(f"Loaded chunk {chunk_idx + 1}/{self.num_chunks}: {chunk_size:,} images ({size_mb:.1f} MB)")
+
+    def load_next_chunk(self):
+        """Load next chunk of files. Called by rotation callback."""
+        next_chunk = (self.current_chunk_idx + 1) % self.num_chunks
+        self._load_chunk(next_chunk)
+
+    def __len__(self) -> int:
+        return len(self.current_images)
+
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        """Get image from current chunk."""
+        img = self.current_images[idx]
+        # Normalize uint8 [0, 255] to float32 [0, 1]
+        img = img.astype(np.float32) / 255.0
+        return torch.from_numpy(img).float().permute(2, 0, 1)  # (C, H, W)
+
+
+class WorldModelDataset(torch.utils.data.Dataset):
+    """Sequential dataset for World Model training with sequences and subsampling.
+
+    Loads chunks of files sequentially and extracts sequences for transformer training.
+    Lower subsample rate than VAE since we need consecutive frames.
+    """
+
+    def __init__(
+        self,
+        data_dir: str,
+        chunk_files: List[str],
+        sequence_length: int = 64,
+        subsample_rate: int = 4,
+        files_per_chunk: int = 5,
+    ):
+        """
+        Args:
+            data_dir: Directory containing HDF5 chunk files
+            chunk_files: List of chunk filenames to load from
+            sequence_length: Length of sequences to extract
+            subsample_rate: Use every Nth frame (default 4 for less data but still sequences)
+            files_per_chunk: Number of files to load at once (default 5 = ~6GB)
+        """
+        self.data_dir = data_dir
+        self.chunk_files = chunk_files
+        self.sequence_length = sequence_length
+        self.subsample_rate = subsample_rate
+        self.files_per_chunk = files_per_chunk
+
+        # Build index of all possible sequences
+        self._build_index()
+
+        # Chunked loading state
+        self.current_chunk_idx = 0
+        self.num_chunks = (len(chunk_files) + files_per_chunk - 1) // files_per_chunk
+        self.current_sequences = []
+
+        # Load first chunk
+        self._load_chunk(0)
+
+    def _build_index(self):
+        """Build index of sequences across all files.
+
+        A sequence is valid if all frames can be extracted from the same episode
+        after subsampling.
+        """
+        self.sequence_indices = []  # List of (file_idx, ep_idx_in_file, start_frame_idx)
+
+        total_sequences = 0
+
+        for file_idx, chunk_file in enumerate(self.chunk_files):
+            filepath = os.path.join(self.data_dir, chunk_file)
+            with h5py.File(filepath, "r") as f:
+                ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+                for ep_idx_in_file, ep_name in enumerate(ep_names):
+                    num_frames = len(f[ep_name]["observations"])
+
+                    # After subsampling, how many frames do we have?
+                    subsampled_frames = num_frames // self.subsample_rate
+
+                    # Can we extract a sequence of required length?
+                    if subsampled_frames >= self.sequence_length:
+                        # Each starting position creates a valid sequence
+                        # Start positions are every subsample_rate frames
+                        max_start = num_frames - (self.sequence_length * self.subsample_rate)
+                        for start_idx in range(0, max_start + 1, self.subsample_rate):
+                            self.sequence_indices.append((file_idx, ep_idx_in_file, start_idx))
+                            total_sequences += 1
+
+        print(f"World Model Dataset: {total_sequences:,} sequences (length {self.sequence_length}, subsample rate: 1/{self.subsample_rate})")
+        print(f"  {len(self.chunk_files)} files → {self.num_chunks} chunks of {self.files_per_chunk} files")
+
+    def _load_chunk(self, chunk_idx: int):
+        """Load a chunk of files and extract sequences."""
+        # Calculate which files belong to this chunk
+        start_file = chunk_idx * self.files_per_chunk
+        end_file = min(start_file + self.files_per_chunk, len(self.chunk_files))
+
+        # Find sequences for this chunk
+        chunk_sequences = []
+
+        current_file = None
+        current_file_handle = None
+
+        for file_idx, ep_idx, start_frame in self.sequence_indices:
+            if file_idx < start_file:
+                continue
+            if file_idx >= end_file:
+                break
+
+            # Open new file if needed
+            if current_file != file_idx:
+                if current_file_handle is not None:
+                    current_file_handle.close()
+                filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+                current_file_handle = h5py.File(filepath, "r")
+                current_file = file_idx
+
+            # Load sequence
+            ep_names = sorted([k for k in current_file_handle.keys() if k.startswith("episode_")])
+            ep_name = ep_names[ep_idx]
+            ep_group = current_file_handle[ep_name]
+
+            # Extract frames at subsample rate
+            frame_indices = list(range(start_frame, start_frame + self.sequence_length * self.subsample_rate, self.subsample_rate))
+
+            obs_seq = ep_group["observations"][frame_indices]
+            actions_seq = ep_group["actions"][frame_indices[:-1]]  # N-1 actions for N frames
+            rewards_seq = ep_group["rewards"][frame_indices[:-1]]
+            dones_seq = ep_group["dones"][frame_indices[:-1]]
+
+            chunk_sequences.append({
+                "observations": obs_seq,
+                "actions": actions_seq,
+                "rewards": rewards_seq,
+                "dones": dones_seq,
+            })
+
+        if current_file_handle is not None:
+            current_file_handle.close()
+
+        # Store sequences
+        self.current_sequences = chunk_sequences
+        self.current_chunk_idx = chunk_idx
+
+        size_mb = sum(seq["observations"].nbytes for seq in chunk_sequences) / (1024 * 1024)
+        print(f"Loaded chunk {chunk_idx + 1}/{self.num_chunks}: {len(chunk_sequences):,} sequences ({size_mb:.1f} MB)")
+
+    def load_next_chunk(self):
+        """Load next chunk of files. Called by rotation callback."""
+        next_chunk = (self.current_chunk_idx + 1) % self.num_chunks
+        self._load_chunk(next_chunk)
+
+    def __len__(self) -> int:
+        return len(self.current_sequences)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Get sequence from current chunk."""
+        seq_data = self.current_sequences[idx]
+
+        # Normalize observations uint8 [0, 255] to float32 [0, 1]
+        obs = seq_data["observations"].astype(np.float32) / 255.0
+
+        return {
+            "observations": torch.from_numpy(obs).float().permute(0, 3, 1, 2),  # (T, C, H, W)
+            "actions": torch.from_numpy(seq_data["actions"]).float(),
+            "rewards": torch.from_numpy(seq_data["rewards"]).float(),
+            "dones": torch.from_numpy(seq_data["dones"]).bool(),
+        }
+
+
 def test_parallel_performance():
     """Test parallel vs sequential collection performance."""
     print("🏃‍♂️ Testing Parallel Data Collection Performance")

@@ -16,6 +16,8 @@ from world_models import (
     DataCollector,
     ImageDataset,
     SequenceDataset,
+    VAEDataset,
+    WorldModelDataset,
     VAELightningModule,
     VAETrainer,
     WorldModel,
@@ -249,38 +251,28 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     from lightning.pytorch.loggers import TensorBoardLogger
     from src.world_models.lightning_training import ChunkRotationCallback
 
-    # Create dataset with lazy loading (don't load all episodes into memory)
+    # Create VAE dataset with sequential chunk loading
     collector = DataCollector(config.data)
     chunk_files = collector.get_chunk_files(data_file)
 
     if chunk_files:
-        # Get chunk group parameters from config (with defaults)
-        chunk_group_size = getattr(config.training, 'chunk_group_size', 5)
-        epochs_per_phase = getattr(config.training, 'epochs_per_phase', 3)
-
-        # Calculate base chunk size (images per base chunk)
-        # This will be multiplied by chunk_group_size to get total RAM usage
-        images_per_chunk = config.training.steps_per_epoch * config.training.batch_size * 2
-
-        # Use chunked loading with chunk groups for large datasets
-        dataset = ImageDataset(
+        # Use new VAEDataset with sequential loading and subsampling
+        dataset = VAEDataset(
             data_dir=config.data.data_dir,
             chunk_files=chunk_files,
-            subsample_rate=config.training.subsample_rate,
-            chunk_group_size=chunk_group_size,
-            epochs_per_phase=epochs_per_phase,
-            images_per_chunk=images_per_chunk,
+            subsample_rate=config.training.vae_subsample_rate,
+            files_per_chunk=config.training.vae_files_per_chunk,
         )
     else:
         # Fallback to loading episodes for backward compatibility
         episodes = collector.load_episodes(data_file)
         dataset = ImageDataset(episodes=episodes)
 
-    # Create train/val dataloaders with random sampling
+    # Create train/val dataloaders with sequential sampling
     pin_memory = config.training.device == "cuda"
 
-    # Use num_workers=0 for chunked loading (data already in RAM, avoid multiprocessing overhead)
-    num_workers = 0 if (hasattr(dataset, 'use_chunking') and dataset.use_chunking) else config.training.num_dataloader_workers
+    # Use num_workers=0 for sequential chunked loading (data already in RAM)
+    num_workers = 0
 
     train_loader, val_loader = create_train_val_dataloaders(
         dataset=dataset,
@@ -321,11 +313,11 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     # Build callbacks list
     callbacks = [checkpoint_callback, early_stopping]
 
-    # Add chunk rotation callback if using chunked loading
-    if hasattr(dataset, 'use_chunking') and dataset.use_chunking:
-        epochs_per_phase = getattr(config.training, 'epochs_per_phase', 3)
-        callbacks.append(ChunkRotationCallback(epochs_per_phase=epochs_per_phase))
-        print(f"  - Chunk rotation enabled: rotating every {epochs_per_phase} epochs")
+    # Add chunk rotation callback for VAEDataset
+    if isinstance(dataset, VAEDataset):
+        # Rotate through chunks every epoch for VAEDataset
+        callbacks.append(ChunkRotationCallback(epochs_per_phase=1))
+        print(f"  - Chunk rotation enabled: rotating every epoch")
 
     # Setup TensorBoard logger
     tb_logger = TensorBoardLogger(
@@ -351,7 +343,10 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
         f"Training VAE with Lightning (max {config.training.train_vae_epochs} epochs)..."
     )
     print(f"  - {config.training.steps_per_epoch} batches per epoch")
-    print(f"  - Subsample rate: 1/{config.training.subsample_rate}")
+    if isinstance(dataset, VAEDataset):
+        print(f"  - Subsample rate: 1/{config.training.vae_subsample_rate}")
+    else:
+        print(f"  - Subsample rate: 1/{config.training.subsample_rate}")
     print(f"  - Validation split: {config.training.val_split*100:.1f}%")
     print(
         f"  - Early stopping patience: {config.training.early_stopping_patience} epochs"
@@ -391,29 +386,34 @@ def train_world_model(
     from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
 
-    # Create dataset with lazy loading (don't load all episodes into memory)
+    # Create WorldModelDataset with sequential chunk loading
     collector = DataCollector(config.data)
     chunk_files = collector.get_chunk_files(data_file)
 
     if chunk_files:
-        # Use lazy loading for chunked data
-        dataset = SequenceDataset(
-            sequence_length=config.world_model.sequence_length,
+        # Use new WorldModelDataset with sequential loading and subsampling
+        dataset = WorldModelDataset(
             data_dir=config.data.data_dir,
             chunk_files=chunk_files,
+            sequence_length=config.training.world_model_sequence_length,
+            subsample_rate=config.training.world_model_subsample_rate,
+            files_per_chunk=config.training.world_model_files_per_chunk,
         )
     else:
         # Fallback to loading episodes for backward compatibility
         episodes = collector.load_episodes(data_file)
         dataset = SequenceDataset(episodes, config.world_model.sequence_length)
 
-    # Create train/val dataloaders
+    # Create train/val dataloaders with sequential sampling
     pin_memory = config.training.device == "cuda"
+
+    # Use num_workers=0 for sequential chunked loading (data already in RAM)
+    num_workers = 0
 
     train_loader, val_loader = create_sequence_train_val_dataloaders(
         dataset=dataset,
         batch_size=config.training.world_model_batch_size,
-        num_workers=config.training.num_dataloader_workers,
+        num_workers=num_workers,
         val_split=config.training.val_split,
         train_samples_per_epoch=config.training.world_model_steps_per_epoch,
         val_samples=config.training.world_model_val_samples,
@@ -486,6 +486,16 @@ def train_world_model(
         mode="min",
     )
 
+    # Build callbacks list
+    callbacks = [checkpoint_callback, early_stopping]
+
+    # Add chunk rotation callback for WorldModelDataset
+    if isinstance(dataset, WorldModelDataset):
+        from src.world_models.lightning_training import ChunkRotationCallback
+        # Rotate through chunks every epoch for WorldModelDataset
+        callbacks.append(ChunkRotationCallback(epochs_per_phase=1))
+        print(f"  - Chunk rotation enabled: rotating every epoch")
+
     # Setup TensorBoard logger
     tb_logger = TensorBoardLogger(
         save_dir=config.training.checkpoint_dir,
@@ -498,7 +508,7 @@ def train_world_model(
         max_epochs=config.training.train_world_model_epochs,
         accelerator="auto",
         devices=1,
-        callbacks=[checkpoint_callback, early_stopping],
+        callbacks=callbacks,
         logger=tb_logger,
         limit_train_batches=config.training.world_model_steps_per_epoch,
         val_check_interval=1.0,
@@ -523,7 +533,11 @@ def train_world_model(
         )
     )
     print(f"  - {config.training.world_model_steps_per_epoch} batches per epoch")
-    print(f"  - Sequence length: {config.world_model.sequence_length}")
+    if isinstance(dataset, WorldModelDataset):
+        print(f"  - Sequence length: {config.training.world_model_sequence_length}")
+        print(f"  - Subsample rate: 1/{config.training.world_model_subsample_rate}")
+    else:
+        print(f"  - Sequence length: {config.world_model.sequence_length}")
     print(f"  - Validation split: {config.training.val_split*100:.1f}%")
     print(
         f"  - Early stopping patience: {config.training.early_stopping_patience} epochs"

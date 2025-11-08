@@ -9,7 +9,7 @@ __version__ = "0.1.0"
 
 from .agents import Agent, HumanAgent, RandomAgent, WorldModelAgent, create_agent
 from .config import WorldModelAgentConfig
-from .data_collection import DataCollector, ImageDataset, SequenceDataset
+from .data_collection import DataCollector, ImageDataset, SequenceDataset, VAEDataset, WorldModelDataset
 from .models import FSQVAE, Controller, EvolutionaryController, WorldModel
 from .training import ControllerTrainer, VAETrainer, WorldModelTrainer
 from .lightning_training import (
@@ -34,6 +34,8 @@ __all__ = [
     "DataCollector",
     "ImageDataset",
     "SequenceDataset",
+    "VAEDataset",
+    "WorldModelDataset",
     "VAETrainer",
     "WorldModelTrainer",
     "ControllerTrainer",

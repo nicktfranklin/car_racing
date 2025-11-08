@@ -339,9 +339,11 @@ class ChunkRotationCallback(L.Callback):
                 # Unwrap Subset to get the underlying dataset (for non-chunked mode)
                 if hasattr(dataset, 'dataset'):
                     dataset = dataset.dataset
-                # Call rotation method if available
+                # Call rotation method if available (supports both old and new datasets)
                 if hasattr(dataset, 'rotate_to_next_chunk_group'):
                     dataset.rotate_to_next_chunk_group()
+                elif hasattr(dataset, 'load_next_chunk'):
+                    dataset.load_next_chunk()
 
 
 def worker_init_fn(worker_id):

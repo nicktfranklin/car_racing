@@ -270,12 +270,23 @@ class TrainingConfig(BaseModel):
         default=1, description="Subsample rate for image dataset (use every Nth frame)"
     )
 
-    # Chunked loading parameters (for memory-efficient random sampling)
-    chunk_group_size: int = Field(
-        default=5, description="Number of chunks to load together for chunked mode"
+    # VAE dataset parameters
+    vae_subsample_rate: int = Field(
+        default=10, description="Subsample rate for VAE (use every Nth frame for decorrelation)"
     )
-    epochs_per_phase: int = Field(
-        default=3, description="How many epochs to use each chunk group before rotating"
+    vae_files_per_chunk: int = Field(
+        default=5, description="Number of files to load per chunk for VAE training"
+    )
+
+    # World Model dataset parameters
+    world_model_subsample_rate: int = Field(
+        default=4, description="Subsample rate for World Model (use every Nth frame)"
+    )
+    world_model_files_per_chunk: int = Field(
+        default=5, description="Number of files to load per chunk for World Model training"
+    )
+    world_model_sequence_length: int = Field(
+        default=64, description="Sequence length for World Model training"
     )
 
     # World Model specific parameters
