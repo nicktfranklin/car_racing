@@ -681,26 +681,11 @@ class SequenceDataset(torch.utils.data.Dataset):
         )
 
     def _build_lazy_index(self):
-        """Build sequence indices by scanning HDF5 files without loading data.
-
-        If worker sharding is enabled (via set_worker_shard), only indexes
-        the files assigned to this worker.
-        """
+        """Build sequence indices by scanning HDF5 files without loading data."""
         self.sequences = []  # List of (file_idx, ep_idx_in_file, start_idx)
-
-        # Determine which files this worker should index
-        files_to_index = self.chunk_files
-        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
-            worker_id, num_workers = self._worker_shard_info
-            # Shard files across workers (each worker gets every Nth file)
-            files_to_index = [f for i, f in enumerate(self.chunk_files) if i % num_workers == worker_id]
 
         total_episodes = 0
         for file_idx, chunk_file in enumerate(self.chunk_files):
-            # Skip files not assigned to this worker
-            if chunk_file not in files_to_index:
-                continue
-
             filepath = os.path.join(self.data_dir, chunk_file)
             with h5py.File(filepath, "r") as f:
                 ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
@@ -712,20 +697,18 @@ class SequenceDataset(torch.utils.data.Dataset):
                             self.sequences.append((file_idx, ep_idx_in_file, start_idx))
                 total_episodes += len(ep_names)
 
-        shard_info = ""
-        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
-            worker_id, num_workers = self._worker_shard_info
-            shard_info = f" (worker {worker_id}/{num_workers}, {len(files_to_index)}/{len(self.chunk_files)} files)"
-
         print(
-            f"Created lazy dataset with {len(self.sequences)} sequences from {total_episodes} episodes{shard_info}"
+            f"Created lazy dataset with {len(self.sequences)} sequences from {total_episodes} episodes across {len(self.chunk_files)} files"
         )
 
     def set_worker_shard(self, worker_id: int, num_workers: int):
-        """Set worker sharding info and rebuild index for this worker's files only."""
+        """Set worker sharding info for file handle caching.
+
+        Does NOT rebuild index - all workers maintain the full index.
+        Sharding only affects which files get cached (memory optimization).
+        """
         self._worker_shard_info = (worker_id, num_workers)
-        if self.lazy_load:
-            self._build_lazy_index()
+        print(f"Worker {worker_id}/{num_workers} will cache files {[i for i in range(len(self.chunk_files)) if i % num_workers == worker_id][:5]}... ({len([i for i in range(len(self.chunk_files)) if i % num_workers == worker_id])} files)")
 
     def __len__(self) -> int:
         return len(self.sequences)
@@ -766,62 +749,87 @@ class SequenceDataset(torch.utils.data.Dataset):
         }
 
     def _get_file_handle(self, file_idx: int) -> h5py.File:
-        """Get file handle with caching.
+        """Get file handle with selective caching based on worker sharding.
 
-        With worker sharding, each worker only accesses ~25 files (200/8),
-        so we can safely cache all file handles.
+        Files assigned to this worker are cached. Files not assigned are
+        opened without caching (on-demand access).
         """
         import os
 
         pid = os.getpid()
         cache_key = (pid, file_idx)
 
-        if cache_key not in self._file_handles:
-            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-            # Small cache per file since each worker only has ~25 files
-            self._file_handles[cache_key] = h5py.File(
-                filepath,
-                "r",
-                rdcc_nbytes=4 * 1024 * 1024,  # 4MB cache per file (workers only have ~25 files)
-                rdcc_nslots=1000,
-            )
+        # Check if this file should be cached by this worker
+        should_cache = True
+        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+            worker_id, num_workers = self._worker_shard_info
+            should_cache = (file_idx % num_workers == worker_id)
 
-        return self._file_handles[cache_key]
+        if should_cache:
+            # Cache files belonging to this worker
+            if cache_key not in self._file_handles:
+                filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+                self._file_handles[cache_key] = h5py.File(
+                    filepath,
+                    "r",
+                    rdcc_nbytes=4 * 1024 * 1024,  # 4MB cache per file
+                    rdcc_nslots=1000,
+                )
+            return self._file_handles[cache_key]
+        else:
+            # Open without caching for files not assigned to this worker
+            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+            return h5py.File(filepath, "r", rdcc_nbytes=0, rdcc_nslots=1)
 
     def _get_lazy_item(self, idx: int) -> Dict[str, torch.Tensor]:
-        """Get item by lazy loading from HDF5 file with caching."""
+        """Get item by lazy loading from HDF5 file with caching.
+
+        Cached files (assigned to this worker) are kept open.
+        Non-cached files are opened and closed immediately.
+        """
         file_idx, ep_idx_in_file, start_idx = self.sequences[idx]
 
-        # Use cached file handle
+        # Check if this file should be cached
+        should_cache = True
+        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+            worker_id, num_workers = self._worker_shard_info
+            should_cache = (file_idx % num_workers == worker_id)
+
+        # Get file handle
         f = self._get_file_handle(file_idx)
-        ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
-        ep_name = ep_names[ep_idx_in_file]
-        ep_group = f[ep_name]
+        try:
+            ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+            ep_name = ep_names[ep_idx_in_file]
+            ep_group = f[ep_name]
 
-        # Extract sequence
-        end_idx = start_idx + self.sequence_length
-        if self.include_initial_frame:
-            obs_seq = ep_group["observations"][start_idx : end_idx + 1]
-        else:
-            obs_seq = ep_group["observations"][start_idx + 1 : end_idx + 1]
+            # Extract sequence
+            end_idx = start_idx + self.sequence_length
+            if self.include_initial_frame:
+                obs_seq = ep_group["observations"][start_idx : end_idx + 1]
+            else:
+                obs_seq = ep_group["observations"][start_idx + 1 : end_idx + 1]
 
-        actions_seq = ep_group["actions"][start_idx:end_idx]
-        rewards_seq = ep_group["rewards"][start_idx:end_idx]
-        dones_seq = ep_group["dones"][start_idx:end_idx]
+            actions_seq = ep_group["actions"][start_idx:end_idx]
+            rewards_seq = ep_group["rewards"][start_idx:end_idx]
+            dones_seq = ep_group["dones"][start_idx:end_idx]
 
-        # Normalize uint8 [0, 255] to float32 [0, 1]
-        # Note: HDF5 returns numpy arrays, no need for np.array() copy
-        obs_seq = obs_seq.astype(np.float32) / 255.0
+            # Normalize uint8 [0, 255] to float32 [0, 1]
+            # Note: HDF5 returns numpy arrays, no need for np.array() copy
+            obs_seq = obs_seq.astype(np.float32) / 255.0
 
-        # Convert to tensors (HDF5 already returns numpy arrays)
-        return {
-            "observations": torch.from_numpy(obs_seq)
-            .float()
-            .permute(0, 3, 1, 2),  # (T, C, H, W)
-            "actions": torch.from_numpy(actions_seq).float(),
-            "rewards": torch.from_numpy(rewards_seq).float(),
-            "dones": torch.from_numpy(dones_seq).bool(),
-        }
+            # Convert to tensors (HDF5 already returns numpy arrays)
+            return {
+                "observations": torch.from_numpy(obs_seq)
+                .float()
+                .permute(0, 3, 1, 2),  # (T, C, H, W)
+                "actions": torch.from_numpy(actions_seq).float(),
+                "rewards": torch.from_numpy(rewards_seq).float(),
+                "dones": torch.from_numpy(dones_seq).bool(),
+            }
+        finally:
+            # Close non-cached files immediately
+            if not should_cache:
+                f.close()
 
     def __del__(self):
         """Close all file handles when dataset is destroyed."""
@@ -879,27 +887,12 @@ class ImageDataset(torch.utils.data.Dataset):
         print(f"Created image dataset with {len(self.images)} images")
 
     def _build_lazy_index(self):
-        """Build image index by scanning HDF5 files without loading data.
-
-        If worker sharding is enabled (via set_worker_shard), only indexes
-        the files assigned to this worker.
-        """
+        """Build image index by scanning HDF5 files without loading data."""
         self.image_indices = []  # List of (file_idx, ep_idx_in_file, frame_idx)
-
-        # Determine which files this worker should index
-        files_to_index = self.chunk_files
-        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
-            worker_id, num_workers = self._worker_shard_info
-            # Shard files across workers (each worker gets every Nth file)
-            files_to_index = [f for i, f in enumerate(self.chunk_files) if i % num_workers == worker_id]
 
         total_images = 0
         subsampled_images = 0
         for file_idx, chunk_file in enumerate(self.chunk_files):
-            # Skip files not assigned to this worker
-            if chunk_file not in files_to_index:
-                continue
-
             filepath = os.path.join(self.data_dir, chunk_file)
             with h5py.File(filepath, "r") as f:
                 ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
@@ -910,25 +903,23 @@ class ImageDataset(torch.utils.data.Dataset):
                         subsampled_images += 1
                     total_images += num_frames
 
-        shard_info = ""
-        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
-            worker_id, num_workers = self._worker_shard_info
-            shard_info = f" (worker {worker_id}/{num_workers}, {len(files_to_index)}/{len(self.chunk_files)} files)"
-
         if self.subsample_rate > 1:
             print(
-                f"Created lazy image dataset with {subsampled_images} images (subsampled from {total_images} at rate 1/{self.subsample_rate}){shard_info}"
+                f"Created lazy image dataset with {subsampled_images} images (subsampled from {total_images} at rate 1/{self.subsample_rate}) across {len(self.chunk_files)} files"
             )
         else:
             print(
-                f"Created lazy image dataset with {total_images} images{shard_info}"
+                f"Created lazy image dataset with {total_images} images across {len(self.chunk_files)} files"
             )
 
     def set_worker_shard(self, worker_id: int, num_workers: int):
-        """Set worker sharding info and rebuild index for this worker's files only."""
+        """Set worker sharding info for file handle caching.
+
+        Does NOT rebuild index - all workers maintain the full index.
+        Sharding only affects which files get cached (memory optimization).
+        """
         self._worker_shard_info = (worker_id, num_workers)
-        if self.lazy_load:
-            self._build_lazy_index()
+        print(f"Worker {worker_id}/{num_workers} will cache files {[i for i in range(len(self.chunk_files)) if i % num_workers == worker_id][:5]}... ({len([i for i in range(len(self.chunk_files)) if i % num_workers == worker_id])} files)")
 
     def __len__(self) -> int:
         if self.lazy_load:
@@ -950,47 +941,69 @@ class ImageDataset(torch.utils.data.Dataset):
         return torch.from_numpy(img).float().permute(2, 0, 1)
 
     def _get_file_handle(self, file_idx: int) -> h5py.File:
-        """Get file handle with caching.
+        """Get file handle with selective caching based on worker sharding.
 
-        With worker sharding, each worker only accesses ~25 files (200/8),
-        so we can safely cache all file handles.
+        Files assigned to this worker are cached. Files not assigned are
+        opened without caching (on-demand access).
         """
         import os
 
         pid = os.getpid()
         cache_key = (pid, file_idx)
 
-        if cache_key not in self._file_handles:
-            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-            # Small cache per file since each worker only has ~25 files
-            self._file_handles[cache_key] = h5py.File(
-                filepath,
-                "r",
-                rdcc_nbytes=4 * 1024 * 1024,  # 4MB cache per file (workers only have ~25 files)
-                rdcc_nslots=1000,
-            )
+        # Check if this file should be cached by this worker
+        should_cache = True
+        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+            worker_id, num_workers = self._worker_shard_info
+            should_cache = (file_idx % num_workers == worker_id)
 
-        return self._file_handles[cache_key]
+        if should_cache:
+            # Cache files belonging to this worker
+            if cache_key not in self._file_handles:
+                filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+                self._file_handles[cache_key] = h5py.File(
+                    filepath,
+                    "r",
+                    rdcc_nbytes=4 * 1024 * 1024,  # 4MB cache per file
+                    rdcc_nslots=1000,
+                )
+            return self._file_handles[cache_key]
+        else:
+            # Open without caching for files not assigned to this worker
+            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+            return h5py.File(filepath, "r", rdcc_nbytes=0, rdcc_nslots=1)
 
     def _get_lazy_item(self, idx: int) -> torch.Tensor:
         """Get item by lazy loading from HDF5 file with caching.
 
-        Uses cached file handles to avoid reopening files on each access.
+        Cached files (assigned to this worker) are kept open.
+        Non-cached files are opened and closed immediately.
         """
         file_idx, ep_idx_in_file, frame_idx = self.image_indices[idx]
 
-        # Use cached file handle
+        # Check if this file should be cached
+        should_cache = True
+        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+            worker_id, num_workers = self._worker_shard_info
+            should_cache = (file_idx % num_workers == worker_id)
+
+        # Get file handle
         f = self._get_file_handle(file_idx)
-        ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
-        ep_name = ep_names[ep_idx_in_file]
-        img = f[ep_name]["observations"][frame_idx]
+        try:
+            ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+            ep_name = ep_names[ep_idx_in_file]
+            img = f[ep_name]["observations"][frame_idx]
 
-        # Normalize uint8 [0, 255] to float32 [0, 1]
-        # Note: HDF5 returns numpy arrays, no need for np.array() copy
-        img = img.astype(np.float32) / 255.0
+            # Normalize uint8 [0, 255] to float32 [0, 1]
+            # Note: HDF5 returns numpy arrays, no need for np.array() copy
+            img = img.astype(np.float32) / 255.0
 
-        # Convert to tensor and permute to (C, H, W)
-        return torch.from_numpy(img).float().permute(2, 0, 1)
+            # Convert to tensor and permute to (C, H, W)
+            return torch.from_numpy(img).float().permute(2, 0, 1)
+        finally:
+            # Close non-cached files immediately
+            if not should_cache:
+                f.close()
 
     def __del__(self):
         """Close all file handles when dataset is destroyed."""
