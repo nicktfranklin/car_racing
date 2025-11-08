@@ -109,17 +109,17 @@ data:
 training:
   device: mps
   batch_size: 128  # Slightly smaller batch for transformer (uses more memory)
-  num_epochs: 100
-  train_vae_epochs: 100
-  train_world_model_epochs: 50
-  train_controller_epochs: 100
+  num_epochs: 1_000
+  train_vae_epochs: 1_000
+  train_world_model_epochs: 1_000
+  train_controller_epochs: 1_000
 
   # Lightning training parameters - VAE
-  steps_per_epoch: 100
-  val_samples: 500
+  steps_per_epoch: 500
+  val_samples: 200  # Reduced from 500 to save RAM
   val_split: 0.05
   early_stopping_patience: 10
-  num_dataloader_workers: 2
+  num_dataloader_workers: 4  # Set to 0 for main process loading (no multiprocessing = less RAM)
   subsample_rate: 4
 
   # Lightning training parameters - World Model

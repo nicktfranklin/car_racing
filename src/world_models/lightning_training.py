@@ -366,7 +366,7 @@ def create_train_val_dataloaders(
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0,
+        persistent_workers=False,  # Disabled to prevent HDF5 file handle memory leaks
         prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
     )
 
@@ -376,7 +376,7 @@ def create_train_val_dataloaders(
         sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0,
+        persistent_workers=False,  # Disabled to prevent HDF5 file handle memory leaks
         prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
     )
 
@@ -446,7 +446,7 @@ def create_sequence_train_val_dataloaders(
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0,
+        persistent_workers=False,  # Disabled to prevent HDF5 file handle memory leaks
         prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
     )
 
@@ -456,7 +456,7 @@ def create_sequence_train_val_dataloaders(
         sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0,
+        persistent_workers=False,  # Disabled to prevent HDF5 file handle memory leaks
         prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
     )
 

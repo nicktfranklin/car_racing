@@ -752,12 +752,12 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         if cache_key not in self._file_handles:
             filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-            # Open with large cache for better performance
+            # Open with minimal cache to prevent memory leaks
             self._file_handles[cache_key] = h5py.File(
                 filepath,
                 "r",
-                rdcc_nbytes=512 * 1024 * 1024,  # 512MB cache per file
-                rdcc_nslots=20000,
+                rdcc_nbytes=16 * 1024 * 1024,  # 16MB cache per file (reduced from 512MB to prevent OOM)
+                rdcc_nslots=5000,  # Reduced from 20000
             )
 
         return self._file_handles[cache_key]
@@ -784,16 +784,17 @@ class SequenceDataset(torch.utils.data.Dataset):
         dones_seq = ep_group["dones"][start_idx:end_idx]
 
         # Normalize uint8 [0, 255] to float32 [0, 1]
-        obs_seq = np.array(obs_seq).astype(np.float32) / 255.0
+        # Note: HDF5 returns numpy arrays, no need for np.array() copy
+        obs_seq = obs_seq.astype(np.float32) / 255.0
 
-        # Convert to tensors
+        # Convert to tensors (HDF5 already returns numpy arrays)
         return {
             "observations": torch.from_numpy(obs_seq)
             .float()
             .permute(0, 3, 1, 2),  # (T, C, H, W)
-            "actions": torch.from_numpy(np.array(actions_seq)).float(),
-            "rewards": torch.from_numpy(np.array(rewards_seq)).float(),
-            "dones": torch.from_numpy(np.array(dones_seq)).bool(),
+            "actions": torch.from_numpy(actions_seq).float(),
+            "rewards": torch.from_numpy(rewards_seq).float(),
+            "dones": torch.from_numpy(dones_seq).bool(),
         }
 
     def __del__(self):
@@ -909,12 +910,12 @@ class ImageDataset(torch.utils.data.Dataset):
 
         if cache_key not in self._file_handles:
             filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-            # Open with large cache for better performance
+            # Open with minimal cache to prevent memory leaks
             self._file_handles[cache_key] = h5py.File(
                 filepath,
                 "r",
-                rdcc_nbytes=512 * 1024 * 1024,  # 512MB cache per file
-                rdcc_nslots=20000,
+                rdcc_nbytes=16 * 1024 * 1024,  # 16MB cache per file (reduced from 512MB to prevent OOM)
+                rdcc_nslots=5000,  # Reduced from 20000
             )
 
         return self._file_handles[cache_key]
@@ -933,7 +934,8 @@ class ImageDataset(torch.utils.data.Dataset):
         img = f[ep_name]["observations"][frame_idx]
 
         # Normalize uint8 [0, 255] to float32 [0, 1]
-        img = np.array(img).astype(np.float32) / 255.0
+        # Note: HDF5 returns numpy arrays, no need for np.array() copy
+        img = img.astype(np.float32) / 255.0
 
         # Convert to tensor and permute to (C, H, W)
         return torch.from_numpy(img).float().permute(2, 0, 1)
