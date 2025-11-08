@@ -367,7 +367,7 @@ def create_train_val_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        prefetch_factor=4 if num_workers > 0 else None,  # Increased for better GPU utilization
+        prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
     )
 
     val_loader = DataLoader(
@@ -377,7 +377,7 @@ def create_train_val_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        prefetch_factor=4 if num_workers > 0 else None,  # Increased for better GPU utilization
+        prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
     )
 
     print(f"Created dataloaders:")
@@ -447,7 +447,7 @@ def create_sequence_train_val_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        prefetch_factor=4 if num_workers > 0 else None,  # Increased for better GPU utilization
+        prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
     )
 
     val_loader = DataLoader(
@@ -457,7 +457,7 @@ def create_sequence_train_val_dataloaders(
         num_workers=num_workers,
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
-        prefetch_factor=4 if num_workers > 0 else None,  # Increased for better GPU utilization
+        prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
     )
 
     print(f"Created sequence dataloaders:")

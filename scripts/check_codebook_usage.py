@@ -2,16 +2,16 @@
 Check codebook usage of trained VAE.
 """
 
-import torch
 import numpy as np
+import torch
 from tqdm import tqdm
 
-from src.world_models import (
+from world_models import (
     FSQVAE,
-    WorldModelAgentConfig,
     DataCollector,
     ImageDataset,
     VAELightningModule,
+    WorldModelAgentConfig,
 )
 
 
@@ -21,15 +21,16 @@ def main():
     device = torch.device(config.training.device)
 
     print("Loading VAE...")
-    vae = FSQVAE(config.fsq_vae, use_perceptual_loss=config.fsq_vae.use_perceptual_loss, device=device)
+    vae = FSQVAE(
+        config.fsq_vae,
+        use_perceptual_loss=config.fsq_vae.use_perceptual_loss,
+        device=device,
+    )
 
     # Load checkpoint
     checkpoint_path = "./checkpoints/vae/last-v2.ckpt"
     vae_module = VAELightningModule.load_from_checkpoint(
-        checkpoint_path,
-        model=vae,
-        config=config,
-        map_location=device
+        checkpoint_path, model=vae, config=config, map_location=device
     )
     vae = vae_module.model
     vae.eval()
@@ -79,12 +80,15 @@ def main():
     print(f"{'='*60}")
     print(f"Total codebook size:     {vae.quantizer.codebook_size}")
     print(f"Unique codes used:       {len(unique_codes)}")
-    print(f"Codebook utilization:    {len(unique_codes)/vae.quantizer.codebook_size*100:.1f}%")
+    print(
+        f"Codebook utilization:    {len(unique_codes)/vae.quantizer.codebook_size*100:.1f}%"
+    )
     print(f"Images analyzed:         {len(all_indices):,}")
     print(f"\nCode usage distribution:")
 
     # Show most/least common codes
     from collections import Counter
+
     code_counts = Counter(all_indices)
     most_common = code_counts.most_common(10)
 

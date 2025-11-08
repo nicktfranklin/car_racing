@@ -12,9 +12,9 @@ import numpy as np
 import pygame
 import torch
 
-from src.world_models import FSQVAE, EvolutionaryController, WorldModelAgentConfig
-from src.world_models.agents import Agent, create_agent
-from src.world_models.training import VAETrainer
+from world_models import FSQVAE, EvolutionaryController, WorldModelAgentConfig
+from world_models.agents import Agent, create_agent
+from world_models.training import VAETrainer
 
 
 def handle_pygame_events(human_agent):

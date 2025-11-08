@@ -9,24 +9,31 @@ This script provides validation of the trained VAE by:
 
 import argparse
 import os
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
 
-from src.world_models import (
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+
+from world_models import (
     FSQVAE,
-    WorldModelAgentConfig,
     DataCollector,
     ImageDataset,
     VAELightningModule,
+    WorldModelAgentConfig,
 )
 
 
-def load_vae(config: WorldModelAgentConfig, checkpoint_dir: str = "./checkpoints", device="cpu"):
+def load_vae(
+    config: WorldModelAgentConfig, checkpoint_dir: str = "./checkpoints", device="cpu"
+):
     """Load trained VAE from checkpoint."""
     # Load with perceptual loss to match checkpoint, but we won't use it for inference
-    vae = FSQVAE(config.fsq_vae, use_perceptual_loss=config.fsq_vae.use_perceptual_loss, device=device)
+    vae = FSQVAE(
+        config.fsq_vae,
+        use_perceptual_loss=config.fsq_vae.use_perceptual_loss,
+        device=device,
+    )
 
     # Try different checkpoint locations (newest first)
     # 1. Try last-v2.ckpt first (newest single-code architecture)
@@ -52,6 +59,7 @@ def load_vae(config: WorldModelAgentConfig, checkpoint_dir: str = "./checkpoints
     elif os.path.exists(vae_dir):
         # Find best checkpoint based on filename
         import glob
+
         ckpt_files = glob.glob(os.path.join(vae_dir, "epoch=*.ckpt"))
         if ckpt_files:
             # Sort by validation loss in filename
@@ -61,10 +69,7 @@ def load_vae(config: WorldModelAgentConfig, checkpoint_dir: str = "./checkpoints
 
     if checkpoint_path and os.path.exists(checkpoint_path):
         vae_module = VAELightningModule.load_from_checkpoint(
-            checkpoint_path,
-            model=vae,
-            config=config,
-            map_location=device
+            checkpoint_path, model=vae, config=config, map_location=device
         )
         vae = vae_module.model
     else:
@@ -107,7 +112,9 @@ def sample_random_latents(vae: FSQVAE, num_samples: int = 16, device="cpu"):
     return torch.cat(samples, dim=0)
 
 
-def get_reconstructions(vae: FSQVAE, dataset: ImageDataset, num_samples: int = 8, device="cpu"):
+def get_reconstructions(
+    vae: FSQVAE, dataset: ImageDataset, num_samples: int = 8, device="cpu"
+):
     """Get original images and their reconstructions."""
     vae = vae.to(device)
 
@@ -128,7 +135,9 @@ def get_reconstructions(vae: FSQVAE, dataset: ImageDataset, num_samples: int = 8
     return torch.cat(originals, dim=0), torch.cat(reconstructions, dim=0)
 
 
-def interpolate_latents(vae: FSQVAE, dataset: ImageDataset, num_steps: int = 8, device="cpu"):
+def interpolate_latents(
+    vae: FSQVAE, dataset: ImageDataset, num_steps: int = 8, device="cpu"
+):
     """Interpolate between two images in latent space."""
     vae = vae.to(device)
 
@@ -172,24 +181,25 @@ def plot_images(images: torch.Tensor, title: str, save_path: str = None, nrow: i
 
     for idx, (ax, img) in enumerate(zip(axes, images)):
         ax.imshow(img)
-        ax.axis('off')
+        ax.axis("off")
 
     # Hide extra axes
     for idx in range(n_images, len(axes)):
-        axes[idx].axis('off')
+        axes[idx].axis("off")
 
     plt.suptitle(title, fontsize=16)
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"Saved to {save_path}")
 
     plt.show()
 
 
-def plot_reconstruction_comparison(originals: torch.Tensor, reconstructions: torch.Tensor,
-                                   save_path: str = None):
+def plot_reconstruction_comparison(
+    originals: torch.Tensor, reconstructions: torch.Tensor, save_path: str = None
+):
     """Plot original vs reconstructed images side by side."""
     # Convert from (N, C, H, W) to (N, H, W, C)
     originals = originals.permute(0, 2, 3, 1).numpy()
@@ -204,20 +214,20 @@ def plot_reconstruction_comparison(originals: torch.Tensor, reconstructions: tor
 
     for idx in range(n_images):
         axes[0, idx].imshow(originals[idx])
-        axes[0, idx].axis('off')
+        axes[0, idx].axis("off")
         if idx == 0:
-            axes[0, idx].set_title('Original', fontsize=10)
+            axes[0, idx].set_title("Original", fontsize=10)
 
         axes[1, idx].imshow(reconstructions[idx])
-        axes[1, idx].axis('off')
+        axes[1, idx].axis("off")
         if idx == 0:
-            axes[1, idx].set_title('Reconstructed', fontsize=10)
+            axes[1, idx].set_title("Reconstructed", fontsize=10)
 
-    plt.suptitle('VAE Reconstructions', fontsize=16)
+    plt.suptitle("VAE Reconstructions", fontsize=16)
     plt.tight_layout()
 
     if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
         print(f"Saved to {save_path}")
 
     plt.show()
@@ -225,14 +235,45 @@ def plot_reconstruction_comparison(originals: torch.Tensor, reconstructions: tor
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize VAE latent space")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Path to config file")
-    parser.add_argument("--checkpoint-dir", type=str, default="./checkpoints", help="Checkpoint directory")
-    parser.add_argument("--data-file", type=str, default="training_data.h5", help="Data file for reconstructions")
-    parser.add_argument("--num-samples", type=int, default=16, help="Number of samples to generate")
-    parser.add_argument("--num-reconstructions", type=int, default=8, help="Number of reconstructions to show")
-    parser.add_argument("--num-interpolations", type=int, default=8, help="Number of interpolation steps")
-    parser.add_argument("--output-dir", type=str, default="./visualizations", help="Output directory for images")
-    parser.add_argument("--device", type=str, default=None, help="Device to use (cuda, mps, cpu)")
+    parser.add_argument(
+        "--config", type=str, default="config.yaml", help="Path to config file"
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default="./checkpoints",
+        help="Checkpoint directory",
+    )
+    parser.add_argument(
+        "--data-file",
+        type=str,
+        default="training_data.h5",
+        help="Data file for reconstructions",
+    )
+    parser.add_argument(
+        "--num-samples", type=int, default=16, help="Number of samples to generate"
+    )
+    parser.add_argument(
+        "--num-reconstructions",
+        type=int,
+        default=8,
+        help="Number of reconstructions to show",
+    )
+    parser.add_argument(
+        "--num-interpolations",
+        type=int,
+        default=8,
+        help="Number of interpolation steps",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="./visualizations",
+        help="Output directory for images",
+    )
+    parser.add_argument(
+        "--device", type=str, default=None, help="Device to use (cuda, mps, cpu)"
+    )
 
     args = parser.parse_args()
 
@@ -261,7 +302,7 @@ def main():
     plot_images(
         random_samples,
         "Random Samples from Latent Space",
-        save_path=os.path.join(args.output_dir, "random_samples.png")
+        save_path=os.path.join(args.output_dir, "random_samples.png"),
     )
 
     # 2. Get reconstructions
@@ -286,17 +327,21 @@ def main():
     plot_reconstruction_comparison(
         originals,
         reconstructions,
-        save_path=os.path.join(args.output_dir, "reconstructions.png")
+        save_path=os.path.join(args.output_dir, "reconstructions.png"),
     )
 
     # 3. Latent interpolation
-    print(f"\nGenerating latent space interpolation ({args.num_interpolations} steps)...")
-    interpolated = interpolate_latents(vae, dataset, args.num_interpolations, device=device)
+    print(
+        f"\nGenerating latent space interpolation ({args.num_interpolations} steps)..."
+    )
+    interpolated = interpolate_latents(
+        vae, dataset, args.num_interpolations, device=device
+    )
     plot_images(
         interpolated,
         "Latent Space Interpolation",
         save_path=os.path.join(args.output_dir, "interpolation.png"),
-        nrow=args.num_interpolations + 2
+        nrow=args.num_interpolations + 2,
     )
 
     print(f"\nAll visualizations saved to {args.output_dir}")
