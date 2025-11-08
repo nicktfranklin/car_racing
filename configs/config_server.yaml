@@ -108,7 +108,7 @@ data:
 
 training:
   device: cuda
-  batch_size: 128  # Slightly smaller batch for transformer (uses more memory)
+  batch_size: 256  # Increased back to 256 now that leaks are fixed
   num_epochs: 1_000
   train_vae_epochs: 1_000
   train_world_model_epochs: 1_000
@@ -119,11 +119,11 @@ training:
   val_samples: 200  # Reduced from 500 to save RAM
   val_split: 0.05
   early_stopping_patience: 10
-  num_dataloader_workers: 4  # Set to 0 for main process loading (no multiprocessing = less RAM)
+  num_dataloader_workers: 8  # Increased to 8 now that HDF5 cache leak is fixed
   subsample_rate: 4
 
   # Lightning training parameters - World Model
-  world_model_batch_size: 32  # Keep same batch size for sequences
+  world_model_batch_size: 64  # Increased from 32 for better GPU utilization
   world_model_steps_per_epoch: 200
   world_model_val_samples: 200
 

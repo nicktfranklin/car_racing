@@ -366,8 +366,8 @@ def create_train_val_dataloaders(
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=False,  # Disabled to prevent HDF5 file handle memory leaks
-        prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
+        persistent_workers=num_workers > 0,  # Safe now that HDF5 cache is only 16MB per file
+        prefetch_factor=4 if num_workers > 0 else None,  # Higher prefetch now that HDF5 cache leak is fixed
     )
 
     val_loader = DataLoader(
@@ -376,8 +376,8 @@ def create_train_val_dataloaders(
         sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=False,  # Disabled to prevent HDF5 file handle memory leaks
-        prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
+        persistent_workers=num_workers > 0,  # Safe now that HDF5 cache is only 16MB per file
+        prefetch_factor=4 if num_workers > 0 else None,  # Higher prefetch now that HDF5 cache leak is fixed
     )
 
     print(f"Created dataloaders:")
@@ -446,8 +446,8 @@ def create_sequence_train_val_dataloaders(
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=False,  # Disabled to prevent HDF5 file handle memory leaks
-        prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
+        persistent_workers=num_workers > 0,  # Safe now that HDF5 cache is only 16MB per file
+        prefetch_factor=4 if num_workers > 0 else None,  # Higher prefetch now that HDF5 cache leak is fixed
     )
 
     val_loader = DataLoader(
@@ -456,8 +456,8 @@ def create_sequence_train_val_dataloaders(
         sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=False,  # Disabled to prevent HDF5 file handle memory leaks
-        prefetch_factor=2 if num_workers > 0 else None,  # Balance between GPU utilization and RAM usage
+        persistent_workers=num_workers > 0,  # Safe now that HDF5 cache is only 16MB per file
+        prefetch_factor=4 if num_workers > 0 else None,  # Higher prefetch now that HDF5 cache leak is fixed
     )
 
     print(f"Created sequence dataloaders:")
