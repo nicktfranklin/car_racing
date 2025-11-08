@@ -681,11 +681,26 @@ class SequenceDataset(torch.utils.data.Dataset):
         )
 
     def _build_lazy_index(self):
-        """Build sequence indices by scanning HDF5 files without loading data."""
+        """Build sequence indices by scanning HDF5 files without loading data.
+
+        If worker sharding is enabled (via set_worker_shard), only indexes
+        the files assigned to this worker.
+        """
         self.sequences = []  # List of (file_idx, ep_idx_in_file, start_idx)
+
+        # Determine which files this worker should index
+        files_to_index = self.chunk_files
+        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+            worker_id, num_workers = self._worker_shard_info
+            # Shard files across workers (each worker gets every Nth file)
+            files_to_index = [f for i, f in enumerate(self.chunk_files) if i % num_workers == worker_id]
 
         total_episodes = 0
         for file_idx, chunk_file in enumerate(self.chunk_files):
+            # Skip files not assigned to this worker
+            if chunk_file not in files_to_index:
+                continue
+
             filepath = os.path.join(self.data_dir, chunk_file)
             with h5py.File(filepath, "r") as f:
                 ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
@@ -697,9 +712,20 @@ class SequenceDataset(torch.utils.data.Dataset):
                             self.sequences.append((file_idx, ep_idx_in_file, start_idx))
                 total_episodes += len(ep_names)
 
+        shard_info = ""
+        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+            worker_id, num_workers = self._worker_shard_info
+            shard_info = f" (worker {worker_id}/{num_workers}, {len(files_to_index)}/{len(self.chunk_files)} files)"
+
         print(
-            f"Created lazy dataset with {len(self.sequences)} sequences from {total_episodes} episodes across {len(self.chunk_files)} files"
+            f"Created lazy dataset with {len(self.sequences)} sequences from {total_episodes} episodes{shard_info}"
         )
+
+    def set_worker_shard(self, worker_id: int, num_workers: int):
+        """Set worker sharding info and rebuild index for this worker's files only."""
+        self._worker_shard_info = (worker_id, num_workers)
+        if self.lazy_load:
+            self._build_lazy_index()
 
     def __len__(self) -> int:
         return len(self.sequences)
@@ -740,38 +766,24 @@ class SequenceDataset(torch.utils.data.Dataset):
         }
 
     def _get_file_handle(self, file_idx: int) -> h5py.File:
-        """Get file handle with minimal caching to save RAM.
+        """Get file handle with caching.
 
-        With 200+ chunk files, caching all handles uses too much memory.
-        Instead, we keep only the most recently used file open.
+        With worker sharding, each worker only accesses ~25 files (200/8),
+        so we can safely cache all file handles.
         """
         import os
 
-        filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-
-        # Only cache the single most recent file handle to minimize memory
         pid = os.getpid()
         cache_key = (pid, file_idx)
 
-        # If this is a different file than last time, close the old one
-        if len(self._file_handles) > 0:
-            cached_keys = list(self._file_handles.keys())
-            for old_key in cached_keys:
-                if old_key != cache_key:
-                    try:
-                        self._file_handles[old_key].close()
-                    except:
-                        pass
-                    del self._file_handles[old_key]
-
-        # Open the file if not already cached
         if cache_key not in self._file_handles:
-            # Open with ZERO cache to minimize memory (rely on OS caching)
+            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+            # Small cache per file since each worker only has ~25 files
             self._file_handles[cache_key] = h5py.File(
                 filepath,
                 "r",
-                rdcc_nbytes=0,  # Zero cache - let OS handle it
-                rdcc_nslots=1,
+                rdcc_nbytes=4 * 1024 * 1024,  # 4MB cache per file (workers only have ~25 files)
+                rdcc_nslots=1000,
             )
 
         return self._file_handles[cache_key]
@@ -867,12 +879,27 @@ class ImageDataset(torch.utils.data.Dataset):
         print(f"Created image dataset with {len(self.images)} images")
 
     def _build_lazy_index(self):
-        """Build image index by scanning HDF5 files without loading data."""
+        """Build image index by scanning HDF5 files without loading data.
+
+        If worker sharding is enabled (via set_worker_shard), only indexes
+        the files assigned to this worker.
+        """
         self.image_indices = []  # List of (file_idx, ep_idx_in_file, frame_idx)
+
+        # Determine which files this worker should index
+        files_to_index = self.chunk_files
+        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+            worker_id, num_workers = self._worker_shard_info
+            # Shard files across workers (each worker gets every Nth file)
+            files_to_index = [f for i, f in enumerate(self.chunk_files) if i % num_workers == worker_id]
 
         total_images = 0
         subsampled_images = 0
         for file_idx, chunk_file in enumerate(self.chunk_files):
+            # Skip files not assigned to this worker
+            if chunk_file not in files_to_index:
+                continue
+
             filepath = os.path.join(self.data_dir, chunk_file)
             with h5py.File(filepath, "r") as f:
                 ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
@@ -883,14 +910,25 @@ class ImageDataset(torch.utils.data.Dataset):
                         subsampled_images += 1
                     total_images += num_frames
 
+        shard_info = ""
+        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+            worker_id, num_workers = self._worker_shard_info
+            shard_info = f" (worker {worker_id}/{num_workers}, {len(files_to_index)}/{len(self.chunk_files)} files)"
+
         if self.subsample_rate > 1:
             print(
-                f"Created lazy image dataset with {subsampled_images} images (subsampled from {total_images} at rate 1/{self.subsample_rate}) across {len(self.chunk_files)} files"
+                f"Created lazy image dataset with {subsampled_images} images (subsampled from {total_images} at rate 1/{self.subsample_rate}){shard_info}"
             )
         else:
             print(
-                f"Created lazy image dataset with {total_images} images across {len(self.chunk_files)} files"
+                f"Created lazy image dataset with {total_images} images{shard_info}"
             )
+
+    def set_worker_shard(self, worker_id: int, num_workers: int):
+        """Set worker sharding info and rebuild index for this worker's files only."""
+        self._worker_shard_info = (worker_id, num_workers)
+        if self.lazy_load:
+            self._build_lazy_index()
 
     def __len__(self) -> int:
         if self.lazy_load:
@@ -912,38 +950,24 @@ class ImageDataset(torch.utils.data.Dataset):
         return torch.from_numpy(img).float().permute(2, 0, 1)
 
     def _get_file_handle(self, file_idx: int) -> h5py.File:
-        """Get file handle with minimal caching to save RAM.
+        """Get file handle with caching.
 
-        With 200+ chunk files, caching all handles uses too much memory.
-        Instead, we keep only the most recently used file open.
+        With worker sharding, each worker only accesses ~25 files (200/8),
+        so we can safely cache all file handles.
         """
         import os
 
-        filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
-
-        # Only cache the single most recent file handle to minimize memory
         pid = os.getpid()
         cache_key = (pid, file_idx)
 
-        # If this is a different file than last time, close the old one
-        if len(self._file_handles) > 0:
-            cached_keys = list(self._file_handles.keys())
-            for old_key in cached_keys:
-                if old_key != cache_key:
-                    try:
-                        self._file_handles[old_key].close()
-                    except:
-                        pass
-                    del self._file_handles[old_key]
-
-        # Open the file if not already cached
         if cache_key not in self._file_handles:
-            # Open with ZERO cache to minimize memory (rely on OS caching)
+            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+            # Small cache per file since each worker only has ~25 files
             self._file_handles[cache_key] = h5py.File(
                 filepath,
                 "r",
-                rdcc_nbytes=0,  # Zero cache - let OS handle it
-                rdcc_nslots=1,
+                rdcc_nbytes=4 * 1024 * 1024,  # 4MB cache per file (workers only have ~25 files)
+                rdcc_nslots=1000,
             )
 
         return self._file_handles[cache_key]

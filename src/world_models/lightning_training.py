@@ -307,6 +307,24 @@ class WorldModelLightningModule(L.LightningModule):
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
 
 
+def worker_init_fn(worker_id):
+    """Initialize worker with file sharding to reduce memory usage.
+
+    Each worker only indexes and accesses a subset of HDF5 chunk files,
+    reducing memory from 200 files × 8 workers to ~25 files × 8 workers.
+    """
+    import torch.utils.data
+    worker_info = torch.utils.data.get_worker_info()
+    if worker_info is not None:
+        dataset = worker_info.dataset
+        # Handle Subset wrapper (used for train/val split)
+        if hasattr(dataset, 'dataset'):
+            dataset = dataset.dataset
+        # Set worker shard if dataset supports it
+        if hasattr(dataset, 'set_worker_shard'):
+            dataset.set_worker_shard(worker_info.id, worker_info.num_workers)
+
+
 def create_train_val_dataloaders(
     dataset,
     batch_size: int,
@@ -359,15 +377,16 @@ def create_train_val_dataloaders(
         val_dataset = Subset(val_dataset, val_indices_subset)
     val_sampler = SequentialSampler(val_dataset)
 
-    # Create dataloaders
+    # Create dataloaders with worker sharding
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0,  # Safe now that HDF5 cache is only 16MB per file
-        prefetch_factor=4 if num_workers > 0 else None,  # Higher prefetch now that HDF5 cache leak is fixed
+        persistent_workers=num_workers > 0,
+        prefetch_factor=4 if num_workers > 0 else None,
+        worker_init_fn=worker_init_fn if num_workers > 0 else None,  # Shard files across workers
     )
 
     val_loader = DataLoader(
@@ -376,8 +395,9 @@ def create_train_val_dataloaders(
         sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0,  # Safe now that HDF5 cache is only 16MB per file
-        prefetch_factor=4 if num_workers > 0 else None,  # Higher prefetch now that HDF5 cache leak is fixed
+        persistent_workers=num_workers > 0,
+        prefetch_factor=4 if num_workers > 0 else None,
+        worker_init_fn=worker_init_fn if num_workers > 0 else None,  # Shard files across workers
     )
 
     print(f"Created dataloaders:")
@@ -439,15 +459,16 @@ def create_sequence_train_val_dataloaders(
         val_dataset = Subset(val_dataset, val_indices_subset)
     val_sampler = SequentialSampler(val_dataset)
 
-    # Create dataloaders
+    # Create dataloaders with worker sharding
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0,  # Safe now that HDF5 cache is only 16MB per file
-        prefetch_factor=4 if num_workers > 0 else None,  # Higher prefetch now that HDF5 cache leak is fixed
+        persistent_workers=num_workers > 0,
+        prefetch_factor=4 if num_workers > 0 else None,
+        worker_init_fn=worker_init_fn if num_workers > 0 else None,  # Shard files across workers
     )
 
     val_loader = DataLoader(
@@ -456,8 +477,9 @@ def create_sequence_train_val_dataloaders(
         sampler=val_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        persistent_workers=num_workers > 0,  # Safe now that HDF5 cache is only 16MB per file
-        prefetch_factor=4 if num_workers > 0 else None,  # Higher prefetch now that HDF5 cache leak is fixed
+        persistent_workers=num_workers > 0,
+        prefetch_factor=4 if num_workers > 0 else None,
+        worker_init_fn=worker_init_fn if num_workers > 0 else None,  # Shard files across workers
     )
 
     print(f"Created sequence dataloaders:")
