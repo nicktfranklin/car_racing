@@ -315,7 +315,9 @@ class ChunkRotationCallback(L.Callback):
     2. Using RandomSampler to sample from this in-memory pool for N epochs
     3. Rotating to the next chunk group every N epochs
 
-    This balances memory efficiency with true random sampling.
+    The dataset's __len__() method returns the current chunk size, so
+    RandomSampler automatically adapts when chunks rotate. No dataloader
+    recreation needed!
     """
 
     def __init__(self, epochs_per_phase: int = 3):
@@ -334,7 +336,7 @@ class ChunkRotationCallback(L.Callback):
             train_dataloader = trainer.train_dataloader
             if hasattr(train_dataloader, 'dataset'):
                 dataset = train_dataloader.dataset
-                # Unwrap Subset to get the underlying dataset
+                # Unwrap Subset to get the underlying dataset (for non-chunked mode)
                 if hasattr(dataset, 'dataset'):
                     dataset = dataset.dataset
                 # Call rotation method if available
@@ -372,6 +374,9 @@ def create_train_val_dataloaders(
     """
     Create train and validation dataloaders with random sampling.
 
+    For chunked datasets: samples from current chunk (no train/val split needed).
+    For non-chunked: uses standard train/val split with random sampling.
+
     Args:
         dataset: Full dataset
         batch_size: Batch size
@@ -384,33 +389,63 @@ def create_train_val_dataloaders(
     Returns:
         train_loader, val_loader
     """
-    dataset_size = len(dataset)
+    using_chunking = hasattr(dataset, 'use_chunking') and dataset.use_chunking
 
-    # Create train/val split
-    val_size = int(dataset_size * val_split)
-    train_size = dataset_size - val_size
+    if using_chunking:
+        # Chunked mode: dataset.__len__() returns current chunk size
+        # RandomSampler will automatically sample from [0, chunk_size)
+        # When chunks rotate, __len__() updates automatically
+        chunk_size = len(dataset)
 
-    # Create indices for split
-    indices = torch.randperm(dataset_size).tolist()
-    train_indices = indices[:train_size]
-    val_indices = indices[train_size:]
+        # No Subset needed - dataset handles indexing internally
+        train_dataset = dataset
+        val_dataset = dataset
 
-    # Create subset datasets
-    train_dataset = Subset(dataset, train_indices)
-    val_dataset = Subset(dataset, val_indices)
+        # Train: random sampling from current chunk
+        train_sampler = RandomSampler(
+            train_dataset, replacement=True, num_samples=train_samples_per_epoch * batch_size
+        )
 
-    # Create samplers - RandomSampler with replacement for infinite sampling
-    train_sampler = RandomSampler(
-        train_dataset, replacement=True, num_samples=train_samples_per_epoch * batch_size
-    )
+        # Validation: sequential sample from current chunk
+        val_sampler = SequentialSampler(range(min(val_samples, chunk_size)))
 
-    # Validation uses a fixed subset WITHOUT shuffling (sequential for reproducibility)
-    # Use SequentialSampler to avoid the shuffling warning
-    if val_samples < len(val_dataset):
-        # If we need to subsample, select random indices once (not shuffling each epoch)
-        val_indices_subset = torch.randperm(len(val_dataset))[:val_samples].tolist()
-        val_dataset = Subset(val_dataset, val_indices_subset)
-    val_sampler = SequentialSampler(val_dataset)
+        print(f"Created chunked dataloaders:")
+        print(f"  Train: sampling from current chunk ({chunk_size:,} images)")
+        print(f"  Val: {min(val_samples, chunk_size):,} samples from current chunk")
+        print(f"  Note: Chunk rotates every N epochs, dataset.__len__() updates automatically")
+    else:
+        # Non-chunked mode: standard train/val split
+        dataset_size = len(dataset)
+
+        # Create train/val split
+        val_size = int(dataset_size * val_split)
+        train_size = dataset_size - val_size
+
+        # Create indices for split
+        indices = torch.randperm(dataset_size).tolist()
+        train_indices = indices[:train_size]
+        val_indices = indices[train_size:]
+
+        # Create subset datasets
+        train_dataset = Subset(dataset, train_indices)
+        val_dataset = Subset(dataset, val_indices)
+
+        # Create samplers - RandomSampler with replacement for infinite sampling
+        train_sampler = RandomSampler(
+            train_dataset, replacement=True, num_samples=train_samples_per_epoch * batch_size
+        )
+
+        # Validation uses a fixed subset WITHOUT shuffling (sequential for reproducibility)
+        # Use SequentialSampler to avoid the shuffling warning
+        if val_samples < len(val_dataset):
+            # If we need to subsample, select random indices once (not shuffling each epoch)
+            val_indices_subset = torch.randperm(len(val_dataset))[:val_samples].tolist()
+            val_dataset = Subset(val_dataset, val_indices_subset)
+        val_sampler = SequentialSampler(val_dataset)
+
+        print(f"Created dataloaders:")
+        print(f"  Train: {len(train_dataset):,} samples, {train_samples_per_epoch} batches/epoch")
+        print(f"  Val: {len(val_dataset):,} samples ({val_split*100:.1f}% of data)")
 
     # Create dataloaders with worker sharding
     train_loader = DataLoader(

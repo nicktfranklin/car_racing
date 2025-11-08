@@ -1036,7 +1036,11 @@ class ImageDataset(torch.utils.data.Dataset):
         print(f"Worker {worker_id}/{num_workers} will cache files {[i for i in range(len(self.chunk_files)) if i % num_workers == worker_id][:5]}... ({len([i for i in range(len(self.chunk_files)) if i % num_workers == worker_id])} files)")
 
     def __len__(self) -> int:
-        if self.lazy_load:
+        if self.use_chunking:
+            # In chunked mode, report size as current chunk size (not full dataset)
+            # This makes RandomSampler sample from [0, chunk_size) instead of [0, full_size)
+            return self.current_chunk_end_idx - self.current_chunk_start_idx
+        elif self.lazy_load:
             return len(self.image_indices)
         else:
             return len(self.images)
@@ -1059,22 +1063,23 @@ class ImageDataset(torch.utils.data.Dataset):
     def _get_chunked_item(self, idx: int) -> torch.Tensor:
         """Get item from current chunk group in RAM.
 
-        RandomSampler can access any index in the current chunk group.
-        Rotation to next chunk group happens at epoch boundaries via callback.
+        In chunked mode, __len__() returns chunk_size, so RandomSampler passes
+        idx in range [0, chunk_size). We use idx directly as the local index.
         """
-        # Calculate local index within current chunk
-        local_idx = idx - self.current_chunk_start_idx
+        # idx is already local to current chunk (in range [0, chunk_size))
+        chunk_size = len(self.current_chunk_images)
 
-        # Sanity check: ensure index is within current chunk group
-        if local_idx < 0 or local_idx >= len(self.current_chunk_images):
-            # This shouldn't happen if RandomSampler is configured correctly
-            # But if it does, fall back to lazy loading
-            print(f"Warning: Index {idx} outside current chunk range [{self.current_chunk_start_idx}, {self.current_chunk_end_idx})")
-            print(f"  Falling back to lazy loading for this sample")
-            return self._get_lazy_item(idx)
+        # Sanity check: ensure index is within current chunk
+        if idx < 0 or idx >= chunk_size:
+            # This shouldn't happen if __len__() is working correctly
+            print(f"Warning: Index {idx} outside chunk size {chunk_size}")
+            print(f"  This indicates a bug in chunked loading logic")
+            # Map to global index and fall back to lazy loading
+            global_idx = self.current_chunk_start_idx + idx
+            return self._get_lazy_item(global_idx)
 
-        # Get image from RAM
-        img = self.current_chunk_images[local_idx]
+        # Get image from RAM using local index
+        img = self.current_chunk_images[idx]
 
         # Normalize uint8 [0, 255] to float32 [0, 1]
         img = img.astype(np.float32) / 255.0
