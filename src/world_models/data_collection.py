@@ -1185,13 +1185,13 @@ class VAEDataset(torch.utils.data.Dataset):
         self.subsample_rate = subsample_rate
         self.files_per_chunk = files_per_chunk
 
-        # Build index of all images
-        self._build_index()
-
-        # Chunked loading state
+        # Chunked loading state (calculate before _build_index for printing)
         self.current_chunk_idx = 0
         self.num_chunks = (len(chunk_files) + files_per_chunk - 1) // files_per_chunk
         self.current_images = None
+
+        # Build index of all images
+        self._build_index()
 
         # Load first chunk
         self._load_chunk(0)
@@ -1320,13 +1320,13 @@ class WorldModelDataset(torch.utils.data.Dataset):
         self.subsample_rate = subsample_rate
         self.files_per_chunk = files_per_chunk
 
-        # Build index of all possible sequences
-        self._build_index()
-
-        # Chunked loading state
+        # Chunked loading state (calculate before _build_index for printing)
         self.current_chunk_idx = 0
         self.num_chunks = (len(chunk_files) + files_per_chunk - 1) // files_per_chunk
         self.current_sequences = []
+
+        # Build index of all possible sequences
+        self._build_index()
 
         # Load first chunk
         self._load_chunk(0)

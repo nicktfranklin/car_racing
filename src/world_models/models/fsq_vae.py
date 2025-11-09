@@ -134,23 +134,35 @@ class FSQQuantizer(nn.Module):
 
         return quantized
 
-    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass with straight-through estimator."""
+    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Forward pass with straight-through estimator.
+
+        Returns:
+            z_quantized: (batch, fsq_dim) quantized continuous values
+            indices: (batch,) flat codebook indices
+            tokens: (batch, fsq_dim) per-dimension discrete tokens
+        """
         z_quantized = self.quantize(z)
 
         # Straight-through estimator: use quantized values in forward pass
         # but gradients flow through the continuous values
         z_quantized = z + (z_quantized - z).detach()
 
-        # Compute indices for each quantized vector
-        indices = self._get_indices(z_quantized)
+        # Compute indices and tokens for each quantized vector
+        indices, tokens = self._get_indices(z_quantized)
 
-        return z_quantized, indices
+        return z_quantized, indices, tokens
 
-    def _get_indices(self, z_quantized: torch.Tensor) -> torch.Tensor:
-        """Convert quantized values to codebook indices."""
+    def _get_indices(self, z_quantized: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Convert quantized values to codebook indices and per-dimension tokens.
+
+        Returns:
+            indices: (batch,) flat codebook indices [0, codebook_size-1]
+            tokens: (batch, fsq_dim) per-dimension tokens, where tokens[:, i] is in [0, levels[i]-1]
+        """
         batch_size = z_quantized.shape[0]
         indices = torch.zeros(batch_size, dtype=torch.long, device=z_quantized.device)
+        tokens = torch.zeros(batch_size, self.dim, dtype=torch.long, device=z_quantized.device)
 
         for i, level in enumerate(self.levels):
             if level > 1:
@@ -160,13 +172,16 @@ class FSQQuantizer(nn.Module):
                 )
                 level_indices = torch.clamp(level_indices, 0, level - 1)
 
-                # Accumulate index (treating as mixed radix)
+                # Store per-dimension token
+                tokens[:, i] = level_indices
+
+                # Accumulate flat index (treating as mixed radix)
                 if i == 0:
                     indices = level_indices
                 else:
                     indices = indices * level + level_indices
 
-        return indices
+        return indices, tokens
 
 
 class SpatialAttentionPool(nn.Module):
@@ -367,11 +382,17 @@ class FSQVAE(nn.Module):
         else:
             self.perceptual_loss = None
 
-    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Encode and quantize input."""
+    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Encode and quantize input.
+
+        Returns:
+            z_q: (batch, fsq_dim) quantized continuous representation
+            indices: (batch,) flat codebook indices
+            tokens: (batch, fsq_dim) per-dimension discrete tokens
+        """
         z = self.encoder(x, return_skips=False)
-        z_q, indices = self.quantizer(z)
-        return z_q, indices
+        z_q, indices, tokens = self.quantizer(z)
+        return z_q, indices, tokens
 
     def decode(self, z_q: torch.Tensor, skips: list = None) -> torch.Tensor:
         """Decode from quantized representation."""
@@ -379,13 +400,21 @@ class FSQVAE(nn.Module):
 
     def forward(
         self, x: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Full forward pass without skip connections (forces bottleneck usage)."""
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Full forward pass without skip connections (forces bottleneck usage).
+
+        Returns:
+            x_recon: (batch, 3, H, W) reconstructed image
+            z: (batch, fsq_dim) continuous latent
+            z_q: (batch, fsq_dim) quantized latent
+            indices: (batch,) flat codebook indices
+            tokens: (batch, fsq_dim) per-dimension discrete tokens
+        """
         z = self.encoder(x, return_skips=False)  # Returns only z when return_skips=False
-        z_q, indices = self.quantizer(z)
+        z_q, indices, tokens = self.quantizer(z)
         x_recon = self.decoder(z_q, skips=None)  # No skip connections
 
-        return x_recon, z, z_q
+        return x_recon, z, z_q, indices, tokens
 
     def compute_loss(
         self, x: torch.Tensor, x_recon: torch.Tensor, z: torch.Tensor, z_q: torch.Tensor, indices: torch.Tensor = None

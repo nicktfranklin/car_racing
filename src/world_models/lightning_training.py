@@ -126,10 +126,7 @@ class VAELightningModule(L.LightningModule):
 
     def training_step(self, batch, batch_idx):
         images = batch
-        x_recon, z, z_q = self.model(images)
-
-        # Get indices for codebook monitoring
-        _, indices = self.model.quantizer(z)
+        x_recon, z, z_q, indices, tokens = self.model(images)
 
         loss, loss_dict = self.model.compute_loss(images, x_recon, z, z_q, indices)
 
@@ -160,10 +157,7 @@ class VAELightningModule(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         images = batch
-        x_recon, z, z_q = self.model(images)
-
-        # Get indices for codebook monitoring
-        _, indices = self.model.quantizer(z)
+        x_recon, z, z_q, indices, tokens = self.model(images)
 
         loss, loss_dict = self.model.compute_loss(images, x_recon, z, z_q, indices)
 
@@ -231,27 +225,32 @@ class WorldModelLightningModule(L.LightningModule):
 
         batch_size, seq_len_plus_one = observations.shape[:2]
 
-        # Encode observations to state indices
+        # Encode observations to FSQ tokens
         with torch.no_grad():
             obs_flat = observations.reshape(-1, *observations.shape[2:])
-            z_q, indices = self.vae.encode(obs_flat)
-            # indices is now (B*T) with single code per image
-            indices = indices.reshape(batch_size, seq_len_plus_one)
+            z_q, indices, tokens = self.vae.encode(obs_flat)
+            # tokens: (B*(T+1), fsq_dim) with per-dimension discrete tokens
+            tokens = tokens.reshape(batch_size, seq_len_plus_one, -1)  # (B, T+1, fsq_dim)
 
-        current_states = indices[:, :-1]
-        next_states = indices[:, 1:]
+        current_state_tokens = tokens[:, :-1]  # (B, T, fsq_dim)
+        next_state_tokens = tokens[:, 1:]      # (B, T, fsq_dim)
 
         # Forward pass
         loss, loss_dict = self.world_model.compute_loss(
-            current_states, actions, next_states, rewards, dones
+            current_state_tokens, actions, next_state_tokens, rewards, dones
         )
 
         # Log metrics
         self.log("train/loss", loss_dict["total_loss"], prog_bar=True)
-        self.log("train/state_loss", loss_dict["state_loss"])
-        self.log("train/state_accuracy", loss_dict["state_accuracy"], prog_bar=True)
+        self.log("train/fsq_loss", loss_dict["fsq_loss"])
+        self.log("train/fsq_accuracy", loss_dict["fsq_accuracy"], prog_bar=True)
         self.log("train/reward_loss", loss_dict["reward_loss"])
         self.log("train/done_loss", loss_dict["done_loss"])
+
+        # Log per-dimension metrics
+        for dim in range(len(self.config.world_model.fsq_levels)):
+            self.log(f"train/fsq_dim{dim}_loss", loss_dict[f"fsq_dim{dim}_loss"])
+            self.log(f"train/fsq_dim{dim}_accuracy", loss_dict[f"fsq_dim{dim}_accuracy"])
 
         return loss
 
@@ -265,23 +264,28 @@ class WorldModelLightningModule(L.LightningModule):
 
         with torch.no_grad():
             obs_flat = observations.reshape(-1, *observations.shape[2:])
-            z_q, indices = self.vae.encode(obs_flat)
-            # indices is now (B*T) with single code per image
-            indices = indices.reshape(batch_size, seq_len_plus_one)
+            z_q, indices, tokens = self.vae.encode(obs_flat)
+            # tokens: (B*(T+1), fsq_dim) with per-dimension discrete tokens
+            tokens = tokens.reshape(batch_size, seq_len_plus_one, -1)  # (B, T+1, fsq_dim)
 
-        current_states = indices[:, :-1]
-        next_states = indices[:, 1:]
+        current_state_tokens = tokens[:, :-1]  # (B, T, fsq_dim)
+        next_state_tokens = tokens[:, 1:]      # (B, T, fsq_dim)
 
         loss, loss_dict = self.world_model.compute_loss(
-            current_states, actions, next_states, rewards, dones
+            current_state_tokens, actions, next_state_tokens, rewards, dones
         )
 
         # Log validation metrics
         self.log("val/loss", loss_dict["total_loss"], prog_bar=True)
-        self.log("val/state_loss", loss_dict["state_loss"])
-        self.log("val/state_accuracy", loss_dict["state_accuracy"], prog_bar=True)
+        self.log("val/fsq_loss", loss_dict["fsq_loss"])
+        self.log("val/fsq_accuracy", loss_dict["fsq_accuracy"], prog_bar=True)
         self.log("val/reward_loss", loss_dict["reward_loss"])
         self.log("val/done_loss", loss_dict["done_loss"])
+
+        # Log per-dimension metrics
+        for dim in range(len(self.config.world_model.fsq_levels)):
+            self.log(f"val/fsq_dim{dim}_loss", loss_dict[f"fsq_dim{dim}_loss"])
+            self.log(f"val/fsq_dim{dim}_accuracy", loss_dict[f"fsq_dim{dim}_accuracy"])
 
         return loss
 

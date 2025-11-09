@@ -122,13 +122,13 @@ training:
   num_dataloader_workers: 0  # Sequential chunk loading uses 0
 
   # VAE dataset parameters (sequential loading with subsampling)
-  vae_subsample_rate: 10  # Use every 10th frame for decorrelation
+  vae_subsample_rate: 16  # Use every 10th frame for decorrelation
   vae_files_per_chunk: 5  # Load 5 files at a time (~500K images, ~6GB)
 
   # World Model dataset parameters (sequential loading with subsampling)
   world_model_subsample_rate: 4  # Use every 4th frame
   world_model_files_per_chunk: 5  # Load 5 files at a time (~6GB)
-  world_model_sequence_length: 64  # Sequence length for transformer
+  world_model_sequence_length: 16  # Reduced from 64 due to autoregressive FSQ (16*5=80 tokens)
 
   # Lightning training parameters - World Model
   world_model_batch_size: 32  # Smaller due to sequences
