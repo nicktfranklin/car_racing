@@ -16,7 +16,7 @@ from .config import WorldModelAgentConfig
 from .data_collection import DataCollector, ImageDataset, SequenceDataset
 from .models.controller import Controller, EvolutionaryController, evaluate_controller
 from .models.fsq_vae import FSQVAE
-from .models.world_model import WorldModel, fsq_to_indices
+from .models.world_model import WorldModel
 
 
 class VAETrainer:

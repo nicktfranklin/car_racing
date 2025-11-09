@@ -1,0 +1,142 @@
+# Test Configuration for Quick Validation
+# This config uses minimal data and training to verify the pipeline works
+# Use: uv run python main.py --config configs/test_config.yaml --stage all
+
+fsq_vae:
+  input_channels: 3
+  input_height: 64
+  input_width: 64
+  encoder_channels: [32, 64, 128, 256, 512]
+  encoder_strides: [2, 2, 2, 2, 2]
+  fsq_levels: [8, 8, 8, 4]  # 2048 codes
+  latent_dim: 128
+  decoder_channels: [512, 256, 128, 64, 32]
+  decoder_strides: [2, 2, 2, 2, 2]
+  learning_rate: 0.001  # Deprecated, use optimizer.learning_rate
+  beta: 1.0
+
+  # Perceptual loss settings
+  use_perceptual_loss: true
+  perceptual_weight: 1.0
+  mse_weight: 0.05
+
+  # Anti-collapse settings
+  entropy_weight: 0.1
+
+  # Optimizer configuration
+  optimizer:
+    optimizer: adamw
+    learning_rate: 0.001
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+    weight_decay: 0.0
+    amsgrad: false
+    use_scheduler: false
+    scheduler: cosine
+    warmup_epochs: 0
+    min_lr: 1.0e-6
+    grad_clip_norm: null
+
+world_model:
+  # Transformer architecture (GPT-2 based)
+  hidden_size: 128  # Reduced from 256 for faster testing
+  dropout: 0.1
+  n_layers: 4  # Reduced from 6 for faster testing
+  n_heads: 4  # Reduced from 8 for faster testing
+  num_layers: 4
+
+  # Input/Output dimensions
+  state_dim: 4  # Match fsq_levels length
+  action_dim: 3
+  fsq_levels: [8, 8, 8, 4]  # Must match fsq_vae - 2048 codes
+
+  # Training parameters
+  learning_rate: 0.0003  # Deprecated, use optimizer.learning_rate
+  sequence_length: 64  # Not used, see training.world_model_sequence_length
+
+  # Optimizer configuration
+  optimizer:
+    optimizer: adamw
+    learning_rate: 0.0003
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+    weight_decay: 0.01
+    amsgrad: false
+
+    # Learning rate scheduler
+    use_scheduler: false  # Disabled for quick testing
+    scheduler: cosine
+    warmup_epochs: 2
+    min_lr: 1.0e-6
+
+    # Gradient clipping
+    grad_clip_norm: 1.0
+
+controller:
+  hidden_sizes: [128, 128]  # Reduced from [256, 256]
+  activation: tanh
+  state_dim: 4
+  action_dim: 3
+  learning_rate: 0.001
+
+  optimizer:
+    optimizer: adamw
+    learning_rate: 0.001
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+    weight_decay: 0.0
+    amsgrad: false
+    use_scheduler: false
+    scheduler: cosine
+    warmup_epochs: 0
+    min_lr: 1.0e-6
+    grad_clip_norm: null
+
+data:
+  env_name: CarRacing-v3
+  render_mode: null
+  num_rollouts: 100  # Minimal for testing (vs 10000 for production)
+  max_episode_length: 500  # Shorter episodes for faster collection
+  num_workers: 2  # Fewer workers for testing
+  batch_size: 100
+  episodes_per_batch: 10
+  frame_skip: 4
+  frame_stack: 1
+  data_dir: ./data
+
+training:
+  device: mps  # Change to 'cuda' or 'cpu' as needed
+  batch_size: 64  # Reduced from 256 for faster testing
+  num_epochs: 10  # Short test epochs
+  train_vae_epochs: 5  # Quick VAE test (vs 1000 for production)
+  train_world_model_epochs: 5  # Quick WM test (vs 1000 for production)
+  train_controller_epochs: 10  # Quick controller test (vs 1000 for production)
+
+  # Lightning training parameters - VAE
+  steps_per_epoch: 50  # Reduced from 500 for faster testing
+  val_samples: 50  # Reduced from 200
+  val_split: 0.05
+  early_stopping_patience: 3  # Reduced from 10
+  num_dataloader_workers: 0  # Sequential chunk loading uses 0
+
+  # VAE dataset parameters (sequential loading with subsampling)
+  vae_subsample_rate: 16  # Use every 16th frame for decorrelation
+  vae_files_per_chunk: 1  # Load only 1 file at a time for testing (vs 5 for production)
+
+  # World Model dataset parameters (sequential loading with subsampling)
+  world_model_subsample_rate: 4  # Use every 4th frame
+  world_model_files_per_chunk: 1  # Load only 1 file at a time for testing (vs 5)
+  world_model_sequence_length: 16  # Keep at 16 (already reduced from 64)
+
+  # Lightning training parameters - World Model
+  world_model_batch_size: 16  # Reduced from 32 for faster testing
+  world_model_steps_per_epoch: 50  # Reduced from 200
+  world_model_val_samples: 50  # Reduced from 200
+
+  eval_every: 10
+  save_every: 25
+  log_every: 10  # More frequent logging for testing
+  checkpoint_dir: ./checkpoints

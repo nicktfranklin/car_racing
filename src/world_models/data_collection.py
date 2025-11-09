@@ -1320,48 +1320,22 @@ class WorldModelDataset(torch.utils.data.Dataset):
         self.subsample_rate = subsample_rate
         self.files_per_chunk = files_per_chunk
 
-        # Chunked loading state (calculate before _build_index for printing)
+        # Chunked loading state
         self.current_chunk_idx = 0
         self.num_chunks = (len(chunk_files) + files_per_chunk - 1) // files_per_chunk
-        self.current_sequences = []
 
-        # Build index of all possible sequences
-        self._build_index()
+        # Pre-allocate storage (will be populated by _load_chunk)
+        self.observations = None
+        self.actions = None
+        self.rewards = None
+        self.dones = None
 
-        # Load first chunk
+        print(f"World Model Dataset: {len(self.chunk_files)} files → {self.num_chunks} chunks of {self.files_per_chunk} files")
+        print(f"  Sequence length: {self.sequence_length}, subsample rate: 1/{self.subsample_rate}")
+        print(f"  Using lazy loading (sequences indexed per chunk)")
+
+        # Load first chunk (will build index for these files only)
         self._load_chunk(0)
-
-    def _build_index(self):
-        """Build index of sequences across all files.
-
-        A sequence is valid if all frames can be extracted from the same episode
-        after subsampling.
-        """
-        self.sequence_indices = []  # List of (file_idx, ep_idx_in_file, start_frame_idx)
-
-        total_sequences = 0
-
-        for file_idx, chunk_file in enumerate(self.chunk_files):
-            filepath = os.path.join(self.data_dir, chunk_file)
-            with h5py.File(filepath, "r") as f:
-                ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
-                for ep_idx_in_file, ep_name in enumerate(ep_names):
-                    num_frames = len(f[ep_name]["observations"])
-
-                    # After subsampling, how many frames do we have?
-                    subsampled_frames = num_frames // self.subsample_rate
-
-                    # Can we extract a sequence of required length?
-                    if subsampled_frames >= self.sequence_length:
-                        # Each starting position creates a valid sequence
-                        # Start positions are every subsample_rate frames
-                        max_start = num_frames - (self.sequence_length * self.subsample_rate)
-                        for start_idx in range(0, max_start + 1, self.subsample_rate):
-                            self.sequence_indices.append((file_idx, ep_idx_in_file, start_idx))
-                            total_sequences += 1
-
-        print(f"World Model Dataset: {total_sequences:,} sequences (length {self.sequence_length}, subsample rate: 1/{self.subsample_rate})")
-        print(f"  {len(self.chunk_files)} files → {self.num_chunks} chunks of {self.files_per_chunk} files")
 
     def _load_chunk(self, chunk_idx: int):
         """Load a chunk of files and extract sequences."""
@@ -1369,18 +1343,42 @@ class WorldModelDataset(torch.utils.data.Dataset):
         start_file = chunk_idx * self.files_per_chunk
         end_file = min(start_file + self.files_per_chunk, len(self.chunk_files))
 
-        # Find sequences for this chunk
-        chunk_sequences = []
+        # First pass: count sequences in this chunk
+        sequence_info = []  # (file_idx, ep_idx, start_frame)
 
+        for file_idx in range(start_file, end_file):
+            filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
+            with h5py.File(filepath, "r") as f:
+                ep_names = sorted([k for k in f.keys() if k.startswith("episode_")])
+                for ep_idx, ep_name in enumerate(ep_names):
+                    num_frames = len(f[ep_name]["observations"])
+
+                    # Can we extract sequences of required length?
+                    max_start = num_frames - (self.sequence_length * self.subsample_rate)
+                    if max_start >= 0:
+                        # Create sequences starting at every subsample_rate frames
+                        for start_idx in range(0, max_start + 1, self.subsample_rate):
+                            sequence_info.append((file_idx, ep_idx, start_idx))
+
+        num_sequences = len(sequence_info)
+
+        # Pre-allocate arrays for all sequences
+        observations = np.empty((num_sequences, self.sequence_length, 64, 64, 3), dtype=np.float32)
+        actions = np.empty((num_sequences, self.sequence_length - 1, 3), dtype=np.float32)
+        rewards = np.empty((num_sequences, self.sequence_length - 1), dtype=np.float32)
+        dones = np.empty((num_sequences, self.sequence_length - 1), dtype=np.bool_)
+
+        # Pre-compute frame indices once
+        frame_indices = list(range(0, self.sequence_length * self.subsample_rate, self.subsample_rate))
+        action_indices = frame_indices[:-1]
+
+        # Second pass: load actual data
+        seq_idx = 0
         current_file = None
         current_file_handle = None
+        episode_names_cache = None
 
-        for file_idx, ep_idx, start_frame in self.sequence_indices:
-            if file_idx < start_file:
-                continue
-            if file_idx >= end_file:
-                break
-
+        for file_idx, ep_idx, start_frame in sequence_info:
             # Open new file if needed
             if current_file != file_idx:
                 if current_file_handle is not None:
@@ -1388,36 +1386,40 @@ class WorldModelDataset(torch.utils.data.Dataset):
                 filepath = os.path.join(self.data_dir, self.chunk_files[file_idx])
                 current_file_handle = h5py.File(filepath, "r")
                 current_file = file_idx
+                # Cache episode names for this file
+                episode_names_cache = sorted([k for k in current_file_handle.keys() if k.startswith("episode_")])
 
             # Load sequence
-            ep_names = sorted([k for k in current_file_handle.keys() if k.startswith("episode_")])
-            ep_name = ep_names[ep_idx]
+            ep_name = episode_names_cache[ep_idx]
             ep_group = current_file_handle[ep_name]
 
-            # Extract frames at subsample rate
-            frame_indices = list(range(start_frame, start_frame + self.sequence_length * self.subsample_rate, self.subsample_rate))
+            # Compute actual frame indices for this sequence
+            actual_frame_indices = [start_frame + offset for offset in frame_indices]
+            actual_action_indices = [start_frame + offset for offset in action_indices]
 
-            obs_seq = ep_group["observations"][frame_indices]
-            actions_seq = ep_group["actions"][frame_indices[:-1]]  # N-1 actions for N frames
-            rewards_seq = ep_group["rewards"][frame_indices[:-1]]
-            dones_seq = ep_group["dones"][frame_indices[:-1]]
+            # Load and normalize observations directly (uint8 → float32 / 255)
+            obs_uint8 = ep_group["observations"][actual_frame_indices]
+            observations[seq_idx] = obs_uint8.astype(np.float32) / 255.0
 
-            chunk_sequences.append({
-                "observations": obs_seq,
-                "actions": actions_seq,
-                "rewards": rewards_seq,
-                "dones": dones_seq,
-            })
+            # Load other data
+            actions[seq_idx] = ep_group["actions"][actual_action_indices]
+            rewards[seq_idx] = ep_group["rewards"][actual_action_indices]
+            dones[seq_idx] = ep_group["dones"][actual_action_indices]
+
+            seq_idx += 1
 
         if current_file_handle is not None:
             current_file_handle.close()
 
-        # Store sequences
-        self.current_sequences = chunk_sequences
+        # Store as single arrays instead of list of dicts
+        self.observations = observations
+        self.actions = actions
+        self.rewards = rewards
+        self.dones = dones
         self.current_chunk_idx = chunk_idx
 
-        size_mb = sum(seq["observations"].nbytes for seq in chunk_sequences) / (1024 * 1024)
-        print(f"Loaded chunk {chunk_idx + 1}/{self.num_chunks}: {len(chunk_sequences):,} sequences ({size_mb:.1f} MB)")
+        size_mb = (observations.nbytes + actions.nbytes + rewards.nbytes + dones.nbytes) / (1024 * 1024)
+        print(f"Loaded chunk {chunk_idx + 1}/{self.num_chunks}: {num_sequences:,} sequences ({size_mb:.1f} MB)")
 
     def load_next_chunk(self):
         """Load next chunk of files. Called by rotation callback."""
@@ -1425,20 +1427,16 @@ class WorldModelDataset(torch.utils.data.Dataset):
         self._load_chunk(next_chunk)
 
     def __len__(self) -> int:
-        return len(self.current_sequences)
+        return len(self.observations)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """Get sequence from current chunk."""
-        seq_data = self.current_sequences[idx]
-
-        # Normalize observations uint8 [0, 255] to float32 [0, 1]
-        obs = seq_data["observations"].astype(np.float32) / 255.0
-
+        """Get sequence from current chunk - already pre-processed."""
+        # Data is already normalized and in correct format
         return {
-            "observations": torch.from_numpy(obs).float().permute(0, 3, 1, 2),  # (T, C, H, W)
-            "actions": torch.from_numpy(seq_data["actions"]).float(),
-            "rewards": torch.from_numpy(seq_data["rewards"]).float(),
-            "dones": torch.from_numpy(seq_data["dones"]).bool(),
+            "observations": torch.from_numpy(self.observations[idx]).permute(0, 3, 1, 2),  # (T, C, H, W)
+            "actions": torch.from_numpy(self.actions[idx]),
+            "rewards": torch.from_numpy(self.rewards[idx]),
+            "dones": torch.from_numpy(self.dones[idx]),
         }
 
 

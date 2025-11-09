@@ -237,20 +237,15 @@ class WorldModelLightningModule(L.LightningModule):
 
         # Forward pass
         loss, loss_dict = self.world_model.compute_loss(
-            current_state_tokens, actions, next_state_tokens, rewards, dones
+            current_state_tokens, next_state_tokens, actions, rewards, dones
         )
 
         # Log metrics
         self.log("train/loss", loss_dict["total_loss"], prog_bar=True)
-        self.log("train/fsq_loss", loss_dict["fsq_loss"])
-        self.log("train/fsq_accuracy", loss_dict["fsq_accuracy"], prog_bar=True)
+        self.log("train/token_loss", loss_dict["token_loss"])
+        self.log("train/token_accuracy", loss_dict["token_accuracy"], prog_bar=True)
         self.log("train/reward_loss", loss_dict["reward_loss"])
         self.log("train/done_loss", loss_dict["done_loss"])
-
-        # Log per-dimension metrics
-        for dim in range(len(self.config.world_model.fsq_levels)):
-            self.log(f"train/fsq_dim{dim}_loss", loss_dict[f"fsq_dim{dim}_loss"])
-            self.log(f"train/fsq_dim{dim}_accuracy", loss_dict[f"fsq_dim{dim}_accuracy"])
 
         return loss
 
@@ -272,20 +267,15 @@ class WorldModelLightningModule(L.LightningModule):
         next_state_tokens = tokens[:, 1:]      # (B, T, fsq_dim)
 
         loss, loss_dict = self.world_model.compute_loss(
-            current_state_tokens, actions, next_state_tokens, rewards, dones
+            current_state_tokens, next_state_tokens, actions, rewards, dones
         )
 
         # Log validation metrics
         self.log("val/loss", loss_dict["total_loss"], prog_bar=True)
-        self.log("val/fsq_loss", loss_dict["fsq_loss"])
-        self.log("val/fsq_accuracy", loss_dict["fsq_accuracy"], prog_bar=True)
+        self.log("val/token_loss", loss_dict["token_loss"])
+        self.log("val/token_accuracy", loss_dict["token_accuracy"], prog_bar=True)
         self.log("val/reward_loss", loss_dict["reward_loss"])
         self.log("val/done_loss", loss_dict["done_loss"])
-
-        # Log per-dimension metrics
-        for dim in range(len(self.config.world_model.fsq_levels)):
-            self.log(f"val/fsq_dim{dim}_loss", loss_dict[f"fsq_dim{dim}_loss"])
-            self.log(f"val/fsq_dim{dim}_accuracy", loss_dict[f"fsq_dim{dim}_accuracy"])
 
         return loss
 
