@@ -128,10 +128,10 @@ training:
   # World Model dataset parameters (sequential loading with subsampling)
   world_model_subsample_rate: 4  # Use every 4th frame
   world_model_files_per_chunk: 5  # Load 5 files at a time (~6GB)
-  world_model_sequence_length: 16  # Reduced from 64 due to autoregressive FSQ (16*5=80 tokens)
+  world_model_sequence_length: 8  # Reduced from 64 due to autoregressive FSQ (16*5=80 tokens)
 
   # Lightning training parameters - World Model
-  world_model_batch_size: 32  # Smaller due to sequences
+  world_model_batch_size: 16  # Smaller due to sequences
   world_model_steps_per_epoch: 200
   world_model_val_samples: 200
 
