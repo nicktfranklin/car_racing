@@ -24,15 +24,14 @@ from world_models.config import WorldModelConfig
 
 
 class WorldModel(nn.Module):
-    """Vanilla GPT-2 world model with 33-token vocabulary."""
+    """Vanilla GPT-2 world model with 32-token vocabulary (no SOS)."""
 
-    # Token vocabulary constants
-    SOS_TOKEN = 0
-    FSQ_TOKEN_START = 1  # Tokens 1-8 for FSQ values 0-7
-    ACTION_STEERING_START = 9   # Tokens 9-16 for steering bins
-    ACTION_GAS_START = 17       # Tokens 17-24 for gas bins
-    ACTION_BRAKE_START = 25     # Tokens 25-32 for brake bins
-    VOCAB_SIZE = 33
+    # Token vocabulary constants (no SOS token)
+    FSQ_TOKEN_START = 0  # Tokens 0-7 for FSQ values 0-7
+    ACTION_STEERING_START = 8   # Tokens 8-15 for steering bins
+    ACTION_GAS_START = 16       # Tokens 16-23 for gas bins
+    ACTION_BRAKE_START = 24     # Tokens 24-31 for brake bins
+    VOCAB_SIZE = 32
     NUM_ACTION_BINS = 8
 
     def __init__(self, config: WorldModelConfig):
@@ -81,7 +80,7 @@ class WorldModel(nn.Module):
         batch_size, seq_len = actions.shape[:2]
         action_tokens = torch.zeros(batch_size, seq_len, 3, dtype=torch.long, device=actions.device)
 
-        # Steering: [-1, 1] -> bins 0-7 -> tokens 9-16
+        # Steering: [-1, 1] -> bins 0-7 -> tokens 8-15
         steering = actions[:, :, 0]
         steering_bins = torch.clamp(
             ((steering + 1.0) / 2.0 * self.NUM_ACTION_BINS).long(),
@@ -90,7 +89,7 @@ class WorldModel(nn.Module):
         )
         action_tokens[:, :, 0] = self.ACTION_STEERING_START + steering_bins
 
-        # Gas: [0, 1] -> bins 0-7 -> tokens 17-24
+        # Gas: [0, 1] -> bins 0-7 -> tokens 16-23
         gas = actions[:, :, 1]
         gas_bins = torch.clamp(
             (gas * self.NUM_ACTION_BINS).long(),
@@ -99,7 +98,7 @@ class WorldModel(nn.Module):
         )
         action_tokens[:, :, 1] = self.ACTION_GAS_START + gas_bins
 
-        # Brake: [0, 1] -> bins 0-7 -> tokens 25-32
+        # Brake: [0, 1] -> bins 0-7 -> tokens 24-31
         brake = actions[:, :, 2]
         brake_bins = torch.clamp(
             (brake * self.NUM_ACTION_BINS).long(),
@@ -123,16 +122,16 @@ class WorldModel(nn.Module):
         batch_size, seq_len = action_tokens.shape[:2]
         actions = torch.zeros(batch_size, seq_len, 3, dtype=torch.float32, device=action_tokens.device)
 
-        # Steering: tokens 9-16 -> bins 0-7 -> [-1, 1]
+        # Steering: tokens 8-15 -> bins 0-7 -> [-1, 1]
         # Use bin centers: (bin + 0.5) / NUM_BINS
         steering_bins = action_tokens[:, :, 0] - self.ACTION_STEERING_START
         actions[:, :, 0] = ((steering_bins.float() + 0.5) / self.NUM_ACTION_BINS) * 2.0 - 1.0
 
-        # Gas: tokens 17-24 -> bins 0-7 -> [0, 1]
+        # Gas: tokens 16-23 -> bins 0-7 -> [0, 1]
         gas_bins = action_tokens[:, :, 1] - self.ACTION_GAS_START
         actions[:, :, 1] = (gas_bins.float() + 0.5) / self.NUM_ACTION_BINS
 
-        # Brake: tokens 25-32 -> bins 0-7 -> [0, 1]
+        # Brake: tokens 24-31 -> bins 0-7 -> [0, 1]
         brake_bins = action_tokens[:, :, 2] - self.ACTION_BRAKE_START
         actions[:, :, 2] = (brake_bins.float() + 0.5) / self.NUM_ACTION_BINS
 
@@ -144,38 +143,35 @@ class WorldModel(nn.Module):
         actions: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Create interleaved token sequence with SOS prepended.
+        Create interleaved token sequence (no SOS token).
 
         Sequence structure:
-          [SOS, s_0^0, s_0^1, s_0^2, s_0^3, a_0_steer, a_0_gas, a_0_brake, s_1^0, ...]
+          [s_0^0, s_0^1, s_0^2, s_0^3, a_0_steer, a_0_gas, a_0_brake, s_1^0, ...]
 
         Args:
             state_tokens: (batch, seq_len, fsq_dim) FSQ tokens (values 0-7)
             actions: (batch, seq_len, 3) continuous actions
 
         Returns:
-            token_ids: (batch, 1 + seq_len * 7) token ID sequence
+            token_ids: (batch, seq_len * 7) token ID sequence
         """
         batch_size, seq_len = state_tokens.shape[:2]
 
         # Discretize actions
         action_tokens = self.discretize_actions(actions)  # (batch, seq_len, 3)
 
-        # Convert FSQ tokens (0-7) to vocabulary IDs (1-8)
+        # FSQ tokens are already in range 0-7, map to vocabulary IDs 0-7
         state_token_ids = state_tokens + self.FSQ_TOKEN_START  # (batch, seq_len, 4)
 
-        # Total sequence length: SOS + seq_len * (4 FSQ + 3 actions)
-        total_length = 1 + seq_len * self.tokens_per_timestep
+        # Total sequence length: seq_len * (4 FSQ + 3 actions)
+        total_length = seq_len * self.tokens_per_timestep
 
         # Pre-allocate token sequence
         token_ids = torch.zeros(batch_size, total_length, dtype=torch.long, device=state_tokens.device)
 
-        # Add SOS token
-        token_ids[:, 0] = self.SOS_TOKEN
-
         # Interleave states and actions
         for t in range(seq_len):
-            base_idx = 1 + t * self.tokens_per_timestep
+            base_idx = t * self.tokens_per_timestep
 
             # Add FSQ tokens
             token_ids[:, base_idx:base_idx + self.fsq_dim] = state_token_ids[:, t, :]
@@ -205,8 +201,8 @@ class WorldModel(nn.Module):
             dones: (batch, seq_len, 1) predicted done flags
             past_key_values: Updated cache
         """
-        # Create token sequence
-        token_ids = self.create_token_sequence(state_tokens, actions)  # (batch, 1 + seq_len * 7)
+        # Create token sequence (no SOS token)
+        token_ids = self.create_token_sequence(state_tokens, actions)  # (batch, seq_len * 7)
 
         # Forward through GPT-2
         outputs = self.transformer(
@@ -222,9 +218,9 @@ class WorldModel(nn.Module):
         # We predict reward/done after each complete timestep (after the brake action)
         hidden_states = self.transformer.transformer(input_ids=token_ids)[0]  # (batch, seq_len, hidden)
 
-        # Positions after each brake action: 1 + t*7 + 6 for t in range(seq_len)
+        # Positions after each brake action: t*7 + 6 for t in range(seq_len)
         seq_len = state_tokens.shape[1]
-        reward_positions = [1 + t * self.tokens_per_timestep + self.tokens_per_timestep - 1
+        reward_positions = [t * self.tokens_per_timestep + self.tokens_per_timestep - 1
                            for t in range(seq_len)]
         reward_features = hidden_states[:, reward_positions, :]  # (batch, seq_len, hidden)
 
@@ -242,7 +238,15 @@ class WorldModel(nn.Module):
         dones: torch.Tensor,
     ) -> Tuple[torch.Tensor, dict]:
         """
-        Compute training loss.
+        Compute fully autoregressive training loss with masking.
+
+        The sequence is: [s_0, a_0, s_1, a_1, s_2, a_2, ...]
+        We predict each token from all previous tokens (standard GPT-2).
+
+        Loss masking:
+        - Mask first state (positions 0-3): no prior context
+        - Mask all actions (positions 4-6, 11-13, ...): actions are inputs, not predictions
+        - Compute loss on all other state tokens (positions 7-10, 14-17, ...)
 
         Args:
             current_state_tokens: (batch, seq_len, fsq_dim) current states
@@ -257,51 +261,73 @@ class WorldModel(nn.Module):
         """
         batch_size, seq_len = current_state_tokens.shape[:2]
 
-        # Create input sequence (without targets)
-        input_ids = self.create_token_sequence(current_state_tokens, actions)  # (batch, 1 + seq_len * 7)
+        # Create full sequence: [s_0, a_0, s_1, a_1, ...]
+        # We need s_0 through s_seq_len, so concatenate current and next states
+        all_states = torch.cat([current_state_tokens, next_state_tokens[:, -1:]], dim=1)  # (batch, seq_len+1, fsq_dim)
+        token_ids = self.create_token_sequence(all_states[:, :-1], actions)  # (batch, seq_len * 7)
 
-        # Create target sequence (shift left by 1 for next-token prediction)
-        # Target: predict next_state_tokens and actions
-        target_ids = self.create_token_sequence(next_state_tokens, actions)  # (batch, 1 + seq_len * 7)
+        # Standard autoregressive targets: predict token i+1 from tokens 0...i
+        inputs = token_ids[:, :-1].contiguous()   # (batch, seq_len * 7 - 1)
+        targets = token_ids[:, 1:].contiguous()   # (batch, seq_len * 7 - 1)
 
-        # Shift targets: predict position i+1 from position i
-        # Input:  [SOS, s_0^0, s_0^1, ...]
-        # Target: [s_0^0, s_0^1, s_0^2, ...]
-        targets = target_ids[:, 1:].contiguous()  # Remove SOS from targets
-        inputs = input_ids[:, :-1].contiguous()   # Remove last token from inputs
+        # Create loss mask: 1 = compute loss, 0 = ignore
+        mask = torch.ones_like(targets, dtype=torch.float32)
+
+        # Mask first state (positions 0-3 in targets, which are positions 1-4 in original sequence)
+        mask[:, :self.fsq_dim] = 0.0
+
+        # Mask all action positions
+        for t in range(seq_len):
+            # Action positions in targets: t*7 + 3, t*7 + 4, t*7 + 5
+            # (corresponding to positions t*7 + 4, t*7 + 5, t*7 + 6 in original sequence)
+            action_start = t * self.tokens_per_timestep + self.fsq_dim
+            if action_start < targets.shape[1]:
+                mask[:, action_start:min(action_start + 3, targets.shape[1])] = 0.0
 
         # Forward pass
         outputs = self.transformer(input_ids=inputs)
         logits = outputs.logits  # (batch, seq_len-1, VOCAB_SIZE)
 
-        # Token prediction loss (cross-entropy)
-        token_loss = F.cross_entropy(
+        # Token prediction loss with masking
+        loss_per_token = F.cross_entropy(
             logits.reshape(-1, self.VOCAB_SIZE),
             targets.reshape(-1),
-            reduction="mean",
+            reduction="none",
         )
+        loss_per_token = loss_per_token.reshape(batch_size, -1)
 
-        # Reward and done prediction
-        # Extract hidden states at positions after each complete timestep
-        # After removing first token (SOS), positions are: t*7 + 6 for t in range(seq_len)
+        # Apply mask and compute mean over non-masked tokens
+        masked_loss = loss_per_token * mask
+        token_loss = masked_loss.sum() / (mask.sum() + 1e-8)
+
+        # Reward and done prediction (from positions after each complete (state, action) pair)
         hidden_states = self.transformer.transformer(input_ids=inputs)[0]
-        reward_positions = [t * self.tokens_per_timestep + self.tokens_per_timestep - 1
-                           for t in range(seq_len)]
-        reward_features = hidden_states[:, reward_positions, :]
+        # Reward positions: after each action sequence (t*7 + 5 for t in range(seq_len))
+        reward_positions = [t * self.tokens_per_timestep + self.fsq_dim + 2
+                           for t in range(seq_len)
+                           if t * self.tokens_per_timestep + self.fsq_dim + 2 < hidden_states.shape[1]]
 
-        pred_rewards = self.reward_head(reward_features).squeeze(-1)
-        pred_dones = self.done_head(reward_features).squeeze(-1)
+        if len(reward_positions) > 0:
+            reward_features = hidden_states[:, reward_positions, :]
+            pred_rewards = self.reward_head(reward_features).squeeze(-1)
+            pred_dones = self.done_head(reward_features).squeeze(-1)
 
-        reward_loss = F.mse_loss(pred_rewards, rewards)
-        done_loss = F.binary_cross_entropy_with_logits(pred_dones, dones.float())
+            # Truncate targets if needed
+            num_reward_preds = len(reward_positions)
+            reward_loss = F.mse_loss(pred_rewards, rewards[:, :num_reward_preds])
+            done_loss = F.binary_cross_entropy_with_logits(pred_dones, dones[:, :num_reward_preds].float())
+        else:
+            reward_loss = torch.tensor(0.0, device=token_loss.device)
+            done_loss = torch.tensor(0.0, device=token_loss.device)
 
         # Total loss
         total_loss = token_loss + reward_loss + done_loss
 
-        # Compute accuracy
+        # Compute accuracy (only on non-masked tokens)
         with torch.no_grad():
             preds = torch.argmax(logits, dim=-1)
-            accuracy = (preds == targets).float().mean()
+            correct = (preds == targets).float() * mask
+            accuracy = correct.sum() / (mask.sum() + 1e-8)
 
         loss_dict = {
             "total_loss": total_loss.item(),
@@ -339,8 +365,8 @@ class WorldModel(nn.Module):
         batch_size = current_state_tokens.shape[0]
         device = current_state_tokens.device
 
-        # Create input sequence
-        input_ids = self.create_token_sequence(current_state_tokens, action)  # (batch, 1 + 7)
+        # Create input sequence (no SOS token)
+        input_ids = self.create_token_sequence(current_state_tokens, action)  # (batch, 7)
 
         # Sample next state tokens autoregressively
         sampled_tokens = []

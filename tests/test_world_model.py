@@ -82,7 +82,7 @@ class TestWorldModel:
         """Test that model initializes correctly."""
         assert isinstance(world_model, nn.Module)
         assert world_model.config == world_model_config
-        assert world_model.VOCAB_SIZE == 33
+        assert world_model.VOCAB_SIZE == 32  # No SOS token
         assert world_model.fsq_dim == 4
         assert world_model.action_dim == 3
         assert world_model.tokens_per_timestep == 7
@@ -98,7 +98,7 @@ class TestWorldModel:
         assert action_tokens.shape == actions.shape
         assert action_tokens.dtype == torch.long
 
-        # Check token ranges
+        # Check token ranges (no SOS, so ranges are 8-15, 16-23, 24-31)
         assert (action_tokens[:, :, 0] >= world_model.ACTION_STEERING_START).all()
         assert (action_tokens[:, :, 0] <= world_model.ACTION_STEERING_START + 7).all()
         assert (action_tokens[:, :, 1] >= world_model.ACTION_GAS_START).all()
@@ -135,21 +135,18 @@ class TestWorldModel:
         # Create sequence
         token_ids = world_model.create_token_sequence(state_tokens, actions)
 
-        # Check shape: SOS + seq_len * (4 FSQ + 3 actions) = 1 + seq_len * 7
-        expected_length = 1 + seq_len * world_model.tokens_per_timestep
+        # Check shape: seq_len * (4 FSQ + 3 actions) = seq_len * 7 (no SOS)
+        expected_length = seq_len * world_model.tokens_per_timestep
         assert token_ids.shape == (batch_size, expected_length)
         assert token_ids.dtype == torch.long
-
-        # Check SOS token
-        assert (token_ids[:, 0] == world_model.SOS_TOKEN).all()
 
         # Check token IDs are in valid range
         assert (token_ids >= 0).all()
         assert (token_ids < world_model.VOCAB_SIZE).all()
 
-        # Check FSQ tokens are in range [1, 8]
+        # Check FSQ tokens are in range [0, 7]
         for t in range(seq_len):
-            base_idx = 1 + t * world_model.tokens_per_timestep
+            base_idx = t * world_model.tokens_per_timestep
             fsq_tokens = token_ids[:, base_idx:base_idx + fsq_dim]
             assert (fsq_tokens >= world_model.FSQ_TOKEN_START).all()
             assert (fsq_tokens <= world_model.FSQ_TOKEN_START + 7).all()
@@ -163,8 +160,8 @@ class TestWorldModel:
         # Forward pass
         logits, rewards, dones, past_kv = world_model(state_tokens, actions)
 
-        # Check shapes
-        expected_seq_len = 1 + seq_len * world_model.tokens_per_timestep
+        # Check shapes (no SOS token)
+        expected_seq_len = seq_len * world_model.tokens_per_timestep
         assert logits.shape == (batch_size, expected_seq_len, world_model.VOCAB_SIZE)
         assert rewards.shape == (batch_size, seq_len, 1)
         assert dones.shape == (batch_size, seq_len, 1)
