@@ -139,4 +139,4 @@ training:
   eval_every: 10
   save_every: 25
   log_every: 10  # More frequent logging for testing
-  checkpoint_dir: ./checkpoints
+  checkpoint_dir: ./tmp_checkpoints

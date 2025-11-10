@@ -14,7 +14,6 @@ import torch
 
 from world_models import FSQVAE, EvolutionaryController, WorldModelAgentConfig
 from world_models.agents import Agent, create_agent
-from world_models.training import VAETrainer
 
 
 def handle_pygame_events(human_agent):
@@ -52,19 +51,14 @@ def load_world_model_agent(
 ) -> Optional[Agent]:
     """Load trained World Model agent."""
     try:
-        # Load VAE
-        vae = FSQVAE(config.fsq_vae)
-        vae_checkpoint_path = os.path.join(
-            config.training.checkpoint_dir, "vae_latest.pth"
-        )
+        # Use CheckpointManager for centralized checkpoint loading
+        from src.world_models.training import CheckpointManager
 
-        if os.path.exists(vae_checkpoint_path):
-            vae_trainer = VAETrainer(vae, config)
-            vae_trainer.load_checkpoint(vae_checkpoint_path)
-            print(f"✅ Loaded VAE from {vae_checkpoint_path}")
-        else:
-            print(f"❌ VAE checkpoint not found: {vae_checkpoint_path}")
-            return None
+        ckpt_manager = CheckpointManager(config)
+
+        # Load VAE
+        vae = ckpt_manager.load_vae(use_perceptual_loss=False, device=device)
+        print(f"✅ Loaded VAE")
 
         # Load Controller
         controller = EvolutionaryController(config.controller)
