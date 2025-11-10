@@ -708,7 +708,9 @@ class SequenceDataset(torch.utils.data.Dataset):
         Sharding only affects which files get cached (memory optimization).
         """
         self._worker_shard_info = (worker_id, num_workers)
-        print(f"Worker {worker_id}/{num_workers} will cache files {[i for i in range(len(self.chunk_files)) if i % num_workers == worker_id][:5]}... ({len([i for i in range(len(self.chunk_files)) if i % num_workers == worker_id])} files)")
+        print(
+            f"Worker {worker_id}/{num_workers} will cache files {[i for i in range(len(self.chunk_files)) if i % num_workers == worker_id][:5]}... ({len([i for i in range(len(self.chunk_files)) if i % num_workers == worker_id])} files)"
+        )
 
     def __len__(self) -> int:
         return len(self.sequences)
@@ -761,9 +763,9 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         # Check if this file should be cached by this worker
         should_cache = True
-        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+        if hasattr(self, "_worker_shard_info") and self._worker_shard_info is not None:
             worker_id, num_workers = self._worker_shard_info
-            should_cache = (file_idx % num_workers == worker_id)
+            should_cache = file_idx % num_workers == worker_id
 
         if should_cache:
             # Cache files belonging to this worker
@@ -791,9 +793,9 @@ class SequenceDataset(torch.utils.data.Dataset):
 
         # Check if this file should be cached
         should_cache = True
-        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+        if hasattr(self, "_worker_shard_info") and self._worker_shard_info is not None:
             worker_id, num_workers = self._worker_shard_info
-            should_cache = (file_idx % num_workers == worker_id)
+            should_cache = file_idx % num_workers == worker_id
 
         # Get file handle
         f = self._get_file_handle(file_idx)
@@ -882,7 +884,9 @@ class ImageDataset(torch.utils.data.Dataset):
             self._build_lazy_index()
 
             # Auto-enable chunked mode for large datasets
-            should_use_chunking = len(chunk_files) > 50 or len(self.image_indices) > 1_000_000
+            should_use_chunking = (
+                len(chunk_files) > 50 or len(self.image_indices) > 1_000_000
+            )
 
             if should_use_chunking and images_per_chunk is not None:
                 # Enable chunked loading with chunk groups
@@ -946,7 +950,9 @@ class ImageDataset(torch.utils.data.Dataset):
         self.num_base_chunks = math.ceil(len(self.image_indices) / self.base_chunk_size)
 
         # Calculate how many chunk groups we have
-        self.total_chunk_groups = math.ceil(self.num_base_chunks / self.chunk_group_size)
+        self.total_chunk_groups = math.ceil(
+            self.num_base_chunks / self.chunk_group_size
+        )
 
         # Track current phase (which chunk group we're on)
         self.current_phase = 0
@@ -959,8 +965,12 @@ class ImageDataset(torch.utils.data.Dataset):
         # Load first chunk group
         self._load_chunk_group(0)
 
-        print(f"Chunked mode: Loading chunk groups of {self.chunk_group_size} base chunks")
-        print(f"  Total: {self.total_chunk_groups} chunk groups ({self.num_base_chunks} base chunks)")
+        print(
+            f"Chunked mode: Loading chunk groups of {self.chunk_group_size} base chunks"
+        )
+        print(
+            f"  Total: {self.total_chunk_groups} chunk groups ({self.num_base_chunks} base chunks)"
+        )
         print(f"  Rotation: Every {self.epochs_per_phase} epochs")
 
     def _load_chunk_group(self, phase_num: int):
@@ -971,7 +981,9 @@ class ImageDataset(torch.utils.data.Dataset):
         """
         # Calculate which base chunks belong to this group
         start_base_chunk = phase_num * self.chunk_group_size
-        end_base_chunk = min(start_base_chunk + self.chunk_group_size, self.num_base_chunks)
+        end_base_chunk = min(
+            start_base_chunk + self.chunk_group_size, self.num_base_chunks
+        )
 
         # Calculate image index range
         start_idx = start_base_chunk * self.base_chunk_size
@@ -997,7 +1009,9 @@ class ImageDataset(torch.utils.data.Dataset):
                 current_file = file_idx
 
             # Load image
-            ep_names = sorted([k for k in current_file_handle.keys() if k.startswith("episode_")])
+            ep_names = sorted(
+                [k for k in current_file_handle.keys() if k.startswith("episode_")]
+            )
             ep_name = ep_names[ep_idx]
             chunk_images[i] = current_file_handle[ep_name]["observations"][frame_idx]
 
@@ -1011,7 +1025,9 @@ class ImageDataset(torch.utils.data.Dataset):
 
         # Calculate size in MB
         size_mb = chunk_size * 64 * 64 * 3 / 1024 / 1024
-        print(f"Loaded chunk group {phase_num}/{self.total_chunk_groups}: images {start_idx:,} to {end_idx:,} ({chunk_size:,} images, {size_mb:.1f} MB)")
+        print(
+            f"Loaded chunk group {phase_num}/{self.total_chunk_groups}: images {start_idx:,} to {end_idx:,} ({chunk_size:,} images, {size_mb:.1f} MB)"
+        )
 
     def rotate_to_next_chunk_group(self):
         """Rotate to next chunk group. Called by Lightning callback every N epochs."""
@@ -1024,7 +1040,9 @@ class ImageDataset(torch.utils.data.Dataset):
         # Load the next chunk group
         self._load_chunk_group(self.current_phase)
 
-        print(f"✓ Rotated to chunk group {self.current_phase}/{self.total_chunk_groups}")
+        print(
+            f"✓ Rotated to chunk group {self.current_phase}/{self.total_chunk_groups}"
+        )
 
     def set_worker_shard(self, worker_id: int, num_workers: int):
         """Set worker sharding info for file handle caching.
@@ -1033,7 +1051,9 @@ class ImageDataset(torch.utils.data.Dataset):
         Sharding only affects which files get cached (memory optimization).
         """
         self._worker_shard_info = (worker_id, num_workers)
-        print(f"Worker {worker_id}/{num_workers} will cache files {[i for i in range(len(self.chunk_files)) if i % num_workers == worker_id][:5]}... ({len([i for i in range(len(self.chunk_files)) if i % num_workers == worker_id])} files)")
+        print(
+            f"Worker {worker_id}/{num_workers} will cache files {[i for i in range(len(self.chunk_files)) if i % num_workers == worker_id][:5]}... ({len([i for i in range(len(self.chunk_files)) if i % num_workers == worker_id])} files)"
+        )
 
     def __len__(self) -> int:
         if self.use_chunking:
@@ -1098,9 +1118,9 @@ class ImageDataset(torch.utils.data.Dataset):
 
         # Check if this file should be cached by this worker
         should_cache = True
-        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+        if hasattr(self, "_worker_shard_info") and self._worker_shard_info is not None:
             worker_id, num_workers = self._worker_shard_info
-            should_cache = (file_idx % num_workers == worker_id)
+            should_cache = file_idx % num_workers == worker_id
 
         if should_cache:
             # Cache files belonging to this worker
@@ -1128,9 +1148,9 @@ class ImageDataset(torch.utils.data.Dataset):
 
         # Check if this file should be cached
         should_cache = True
-        if hasattr(self, '_worker_shard_info') and self._worker_shard_info is not None:
+        if hasattr(self, "_worker_shard_info") and self._worker_shard_info is not None:
             worker_id, num_workers = self._worker_shard_info
-            should_cache = (file_idx % num_workers == worker_id)
+            should_cache = file_idx % num_workers == worker_id
 
         # Get file handle
         f = self._get_file_handle(file_idx)
@@ -1214,8 +1234,12 @@ class VAEDataset(torch.utils.data.Dataset):
                         subsampled_frames += 1
                     total_frames += num_frames
 
-        print(f"VAE Dataset: {subsampled_frames:,} images from {total_frames:,} total (subsample rate: 1/{self.subsample_rate})")
-        print(f"  {len(self.chunk_files)} files → {self.num_chunks} chunks of {self.files_per_chunk} files")
+        print(
+            f"VAE Dataset: {subsampled_frames:,} images from {total_frames:,} total (subsample rate: 1/{self.subsample_rate})"
+        )
+        print(
+            f"  {len(self.chunk_files)} files → {self.num_chunks} chunks of {self.files_per_chunk} files"
+        )
 
     def _load_chunk(self, chunk_idx: int):
         """Load a chunk of files into memory."""
@@ -1259,7 +1283,9 @@ class VAEDataset(torch.utils.data.Dataset):
                 current_file = file_idx
 
             # Load image
-            ep_names = sorted([k for k in current_file_handle.keys() if k.startswith("episode_")])
+            ep_names = sorted(
+                [k for k in current_file_handle.keys() if k.startswith("episode_")]
+            )
             ep_name = ep_names[ep_idx]
             chunk_images[i] = current_file_handle[ep_name]["observations"][frame_idx]
 
@@ -1273,7 +1299,6 @@ class VAEDataset(torch.utils.data.Dataset):
         self.chunk_end_idx = end_img_idx
 
         size_mb = chunk_size * 64 * 64 * 3 / (1024 * 1024)
-        print(f"Loaded chunk {chunk_idx + 1}/{self.num_chunks}: {chunk_size:,} images ({size_mb:.1f} MB)")
 
     def load_next_chunk(self):
         """Load next chunk of files. Called by rotation callback."""
@@ -1330,8 +1355,12 @@ class WorldModelDataset(torch.utils.data.Dataset):
         self.rewards = None
         self.dones = None
 
-        print(f"World Model Dataset: {len(self.chunk_files)} files → {self.num_chunks} chunks of {self.files_per_chunk} files")
-        print(f"  Sequence length: {self.sequence_length}, subsample rate: 1/{self.subsample_rate}")
+        print(
+            f"World Model Dataset: {len(self.chunk_files)} files → {self.num_chunks} chunks of {self.files_per_chunk} files"
+        )
+        print(
+            f"  Sequence length: {self.sequence_length}, subsample rate: 1/{self.subsample_rate}"
+        )
         print(f"  Using lazy loading (sequences indexed per chunk)")
 
         # Load first chunk (will build index for these files only)
@@ -1354,7 +1383,9 @@ class WorldModelDataset(torch.utils.data.Dataset):
                     num_frames = len(f[ep_name]["observations"])
 
                     # Can we extract sequences of required length?
-                    max_start = num_frames - (self.sequence_length * self.subsample_rate)
+                    max_start = num_frames - (
+                        self.sequence_length * self.subsample_rate
+                    )
                     if max_start >= 0:
                         # Create sequences starting at every subsample_rate frames
                         for start_idx in range(0, max_start + 1, self.subsample_rate):
@@ -1363,13 +1394,19 @@ class WorldModelDataset(torch.utils.data.Dataset):
         num_sequences = len(sequence_info)
 
         # Pre-allocate arrays for all sequences
-        observations = np.empty((num_sequences, self.sequence_length, 64, 64, 3), dtype=np.float32)
-        actions = np.empty((num_sequences, self.sequence_length - 1, 3), dtype=np.float32)
+        observations = np.empty(
+            (num_sequences, self.sequence_length, 64, 64, 3), dtype=np.float32
+        )
+        actions = np.empty(
+            (num_sequences, self.sequence_length - 1, 3), dtype=np.float32
+        )
         rewards = np.empty((num_sequences, self.sequence_length - 1), dtype=np.float32)
         dones = np.empty((num_sequences, self.sequence_length - 1), dtype=np.bool_)
 
         # Pre-compute frame indices once
-        frame_indices = list(range(0, self.sequence_length * self.subsample_rate, self.subsample_rate))
+        frame_indices = list(
+            range(0, self.sequence_length * self.subsample_rate, self.subsample_rate)
+        )
         action_indices = frame_indices[:-1]
 
         # Second pass: load actual data
@@ -1387,7 +1424,9 @@ class WorldModelDataset(torch.utils.data.Dataset):
                 current_file_handle = h5py.File(filepath, "r")
                 current_file = file_idx
                 # Cache episode names for this file
-                episode_names_cache = sorted([k for k in current_file_handle.keys() if k.startswith("episode_")])
+                episode_names_cache = sorted(
+                    [k for k in current_file_handle.keys() if k.startswith("episode_")]
+                )
 
             # Load sequence
             ep_name = episode_names_cache[ep_idx]
@@ -1418,8 +1457,12 @@ class WorldModelDataset(torch.utils.data.Dataset):
         self.dones = dones
         self.current_chunk_idx = chunk_idx
 
-        size_mb = (observations.nbytes + actions.nbytes + rewards.nbytes + dones.nbytes) / (1024 * 1024)
-        print(f"Loaded chunk {chunk_idx + 1}/{self.num_chunks}: {num_sequences:,} sequences ({size_mb:.1f} MB)")
+        size_mb = (
+            observations.nbytes + actions.nbytes + rewards.nbytes + dones.nbytes
+        ) / (1024 * 1024)
+        print(
+            f"Loaded chunk {chunk_idx + 1}/{self.num_chunks}: {num_sequences:,} sequences ({size_mb:.1f} MB)"
+        )
 
     def load_next_chunk(self):
         """Load next chunk of files. Called by rotation callback."""
@@ -1433,7 +1476,9 @@ class WorldModelDataset(torch.utils.data.Dataset):
         """Get sequence from current chunk - already pre-processed."""
         # Data is already normalized and in correct format
         return {
-            "observations": torch.from_numpy(self.observations[idx]).permute(0, 3, 1, 2),  # (T, C, H, W)
+            "observations": torch.from_numpy(self.observations[idx]).permute(
+                0, 3, 1, 2
+            ),  # (T, C, H, W)
             "actions": torch.from_numpy(self.actions[idx]),
             "rewards": torch.from_numpy(self.rewards[idx]),
             "dones": torch.from_numpy(self.dones[idx]),

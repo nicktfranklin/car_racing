@@ -28,9 +28,13 @@ class VAETrainer:
         # Use configured device, validate it's available
         device_str = config.training.device
         if device_str == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("CUDA device requested but CUDA is not available on this system")
+            raise RuntimeError(
+                "CUDA device requested but CUDA is not available on this system"
+            )
         elif device_str == "mps" and not torch.backends.mps.is_available():
-            raise RuntimeError("MPS device requested but MPS is not available on this system")
+            raise RuntimeError(
+                "MPS device requested but MPS is not available on this system"
+            )
         self.device = torch.device(device_str)
         print(f"VAETrainer using device: {self.device}")
 
@@ -132,9 +136,13 @@ class WorldModelTrainer:
         # Use configured device, validate it's available
         device_str = config.training.device
         if device_str == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("CUDA device requested but CUDA is not available on this system")
+            raise RuntimeError(
+                "CUDA device requested but CUDA is not available on this system"
+            )
         elif device_str == "mps" and not torch.backends.mps.is_available():
-            raise RuntimeError("MPS device requested but MPS is not available on this system")
+            raise RuntimeError(
+                "MPS device requested but MPS is not available on this system"
+            )
         self.device = torch.device(device_str)
         print(f"WorldModelTrainer using device: {self.device}")
 
@@ -276,9 +284,13 @@ class ControllerTrainer:
         # Use configured device, validate it's available
         device_str = config.training.device
         if device_str == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("CUDA device requested but CUDA is not available on this system")
+            raise RuntimeError(
+                "CUDA device requested but CUDA is not available on this system"
+            )
         elif device_str == "mps" and not torch.backends.mps.is_available():
-            raise RuntimeError("MPS device requested but MPS is not available on this system")
+            raise RuntimeError(
+                "MPS device requested but MPS is not available on this system"
+            )
         self.device = torch.device(device_str)
         print(f"ControllerTrainer using device: {self.device}")
 

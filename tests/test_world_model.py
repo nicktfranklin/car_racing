@@ -52,7 +52,9 @@ def mock_batch():
 
     # FSQ tokens: values in [0, 7] for dims 0-2, [0, 3] for dim 3
     current_state_tokens = torch.randint(0, 8, (batch_size, seq_len, fsq_dim))
-    current_state_tokens[:, :, 3] = torch.randint(0, 4, (batch_size, seq_len))  # Dim 3 only has 4 levels
+    current_state_tokens[:, :, 3] = torch.randint(
+        0, 4, (batch_size, seq_len)
+    )  # Dim 3 only has 4 levels
 
     next_state_tokens = torch.randint(0, 8, (batch_size, seq_len, fsq_dim))
     next_state_tokens[:, :, 3] = torch.randint(0, 4, (batch_size, seq_len))
@@ -147,7 +149,7 @@ class TestWorldModel:
         # Check FSQ tokens are in range [0, 7]
         for t in range(seq_len):
             base_idx = t * world_model.tokens_per_timestep
-            fsq_tokens = token_ids[:, base_idx:base_idx + fsq_dim]
+            fsq_tokens = token_ids[:, base_idx : base_idx + fsq_dim]
             assert (fsq_tokens >= world_model.FSQ_TOKEN_START).all()
             assert (fsq_tokens <= world_model.FSQ_TOKEN_START + 7).all()
 
@@ -238,12 +240,16 @@ class TestWorldModel:
             total_params += 1
             if param.requires_grad:
                 assert param.grad is not None, f"No gradient for {name}"
-                assert torch.isfinite(param.grad).all(), f"Non-finite gradient for {name}"
+                assert torch.isfinite(
+                    param.grad
+                ).all(), f"Non-finite gradient for {name}"
                 has_grad += 1
                 grad_norms.append(param.grad.norm().item())
 
         # Check that we have gradients for all parameters
-        assert has_grad == total_params, f"Only {has_grad}/{total_params} parameters have gradients"
+        assert (
+            has_grad == total_params
+        ), f"Only {has_grad}/{total_params} parameters have gradients"
 
         # Check that gradients are not all zero
         total_grad_norm = sum(grad_norms)
@@ -296,7 +302,9 @@ class TestWorldModel:
         world_model.eval()
 
         # Take a single timestep from batch
-        current_state_tokens = mock_batch["current_state_tokens"][:, :1, :]  # (batch, 1, fsq_dim)
+        current_state_tokens = mock_batch["current_state_tokens"][
+            :, :1, :
+        ]  # (batch, 1, fsq_dim)
         action = mock_batch["actions"][:, :1, :]  # (batch, 1, 3)
 
         # Sample next state
@@ -314,7 +322,7 @@ class TestWorldModel:
         # Check sampled tokens are in valid range
         assert (next_state >= 0).all()
         assert (next_state[:, :, :3] < 8).all()  # First 3 dims: 0-7
-        assert (next_state[:, :, 3] < 4).all()   # Last dim: 0-3
+        assert (next_state[:, :, 3] < 4).all()  # Last dim: 0-3
 
         # Check outputs are finite
         assert torch.isfinite(next_state.float()).all()

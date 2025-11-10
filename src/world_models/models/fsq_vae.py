@@ -16,11 +16,11 @@ from ..config import FSQVAEConfig
 class PerceptualLoss(nn.Module):
     """Perceptual loss using VGG16 features."""
 
-    def __init__(self, layers=None, device='cpu'):
+    def __init__(self, layers=None, device="cpu"):
         super().__init__()
         if layers is None:
             # Use early layers for perceptual similarity
-            layers = ['relu1_2', 'relu2_2', 'relu3_3']
+            layers = ["relu1_2", "relu2_2", "relu3_3"]
 
         self.layers = layers
 
@@ -28,7 +28,12 @@ class PerceptualLoss(nn.Module):
         try:
             # Try newer API first
             from torchvision.models import VGG16_Weights
-            vgg = models.vgg16(weights=VGG16_Weights.IMAGENET1K_V1).features.eval().to(device)
+
+            vgg = (
+                models.vgg16(weights=VGG16_Weights.IMAGENET1K_V1)
+                .features.eval()
+                .to(device)
+            )
         except (ImportError, AttributeError):
             # Fall back to older API
             vgg = models.vgg16(pretrained=True).features.eval().to(device)
@@ -43,22 +48,32 @@ class PerceptualLoss(nn.Module):
 
         # VGG16 layer mapping
         layer_mapping = {
-            'relu1_1': 1, 'relu1_2': 3,
-            'relu2_1': 6, 'relu2_2': 8,
-            'relu3_1': 11, 'relu3_2': 13, 'relu3_3': 15,
-            'relu4_1': 18, 'relu4_2': 20, 'relu4_3': 22,
+            "relu1_1": 1,
+            "relu1_2": 3,
+            "relu2_1": 6,
+            "relu2_2": 8,
+            "relu3_1": 11,
+            "relu3_2": 13,
+            "relu3_3": 15,
+            "relu4_1": 18,
+            "relu4_2": 20,
+            "relu4_3": 22,
         }
 
         prev_idx = 0
         for layer_name in layers:
             idx = layer_mapping[layer_name]
-            self.blocks.append(vgg[prev_idx:idx+1])
+            self.blocks.append(vgg[prev_idx : idx + 1])
             self.layer_names.append(layer_name)
             prev_idx = idx + 1
 
         # Normalization for VGG (ImageNet stats) - must specify device for buffers
-        self.register_buffer('mean', torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1))
-        self.register_buffer('std', torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1))
+        self.register_buffer(
+            "mean", torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
+        )
+        self.register_buffer(
+            "std", torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
+        )
 
     def normalize(self, x):
         """Normalize images for VGG."""
@@ -134,7 +149,9 @@ class FSQQuantizer(nn.Module):
 
         return quantized
 
-    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self, z: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Forward pass with straight-through estimator.
 
         Returns:
@@ -153,7 +170,9 @@ class FSQQuantizer(nn.Module):
 
         return z_quantized, indices, tokens
 
-    def _get_indices(self, z_quantized: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _get_indices(
+        self, z_quantized: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Convert quantized values to codebook indices and per-dimension tokens.
 
         Returns:
@@ -162,7 +181,9 @@ class FSQQuantizer(nn.Module):
         """
         batch_size = z_quantized.shape[0]
         indices = torch.zeros(batch_size, dtype=torch.long, device=z_quantized.device)
-        tokens = torch.zeros(batch_size, self.dim, dtype=torch.long, device=z_quantized.device)
+        tokens = torch.zeros(
+            batch_size, self.dim, dtype=torch.long, device=z_quantized.device
+        )
 
         for i, level in enumerate(self.levels):
             if level > 1:
@@ -232,7 +253,9 @@ class ConvEncoder(nn.Module):
             encoder_layers.extend(
                 [
                     nn.Conv2d(in_channels, out_channels, 4, stride=stride, padding=1),
-                    nn.GroupNorm(min(8, out_channels // 4), out_channels),  # Adaptive group size
+                    nn.GroupNorm(
+                        min(8, out_channels // 4), out_channels
+                    ),  # Adaptive group size
                     nn.ReLU(inplace=True),
                 ]
             )
@@ -240,7 +263,9 @@ class ConvEncoder(nn.Module):
             self.skip_channels.append(out_channels)
 
         # Add final convolution to get to latent dimension
-        encoder_layers.append(nn.Conv2d(in_channels, config.latent_dim, 1, stride=1, padding=0))
+        encoder_layers.append(
+            nn.Conv2d(in_channels, config.latent_dim, 1, stride=1, padding=0)
+        )
         encoder_layers.append(nn.ReLU(inplace=True))
 
         self.encoder = nn.ModuleList(encoder_layers)
@@ -367,7 +392,7 @@ class ConvDecoder(nn.Module):
 class FSQVAE(nn.Module):
     """Complete FSQ-VAE model."""
 
-    def __init__(self, config: FSQVAEConfig, use_perceptual_loss=True, device='cpu'):
+    def __init__(self, config: FSQVAEConfig, use_perceptual_loss=True, device="cpu"):
         super().__init__()
         self.config = config
         self.use_perceptual_loss = use_perceptual_loss
@@ -382,7 +407,9 @@ class FSQVAE(nn.Module):
         else:
             self.perceptual_loss = None
 
-    def encode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def encode(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Encode and quantize input.
 
         Returns:
@@ -410,14 +437,21 @@ class FSQVAE(nn.Module):
             indices: (batch,) flat codebook indices
             tokens: (batch, fsq_dim) per-dimension discrete tokens
         """
-        z = self.encoder(x, return_skips=False)  # Returns only z when return_skips=False
+        z = self.encoder(
+            x, return_skips=False
+        )  # Returns only z when return_skips=False
         z_q, indices, tokens = self.quantizer(z)
         x_recon = self.decoder(z_q, skips=None)  # No skip connections
 
         return x_recon, z, z_q, indices, tokens
 
     def compute_loss(
-        self, x: torch.Tensor, x_recon: torch.Tensor, z: torch.Tensor, z_q: torch.Tensor, indices: torch.Tensor = None
+        self,
+        x: torch.Tensor,
+        x_recon: torch.Tensor,
+        z: torch.Tensor,
+        z_q: torch.Tensor,
+        indices: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, dict]:
         """Compute FSQ-VAE loss with perceptual loss, codebook monitoring, and diversity regularization."""
         # Reconstruction loss (MSE)
@@ -427,7 +461,10 @@ class FSQVAE(nn.Module):
         if self.use_perceptual_loss and self.perceptual_loss is not None:
             perceptual_loss_value = self.perceptual_loss(x_recon, x)
             # Use config weights
-            recon_loss = self.config.mse_weight * mse_loss + self.config.perceptual_weight * perceptual_loss_value
+            recon_loss = (
+                self.config.mse_weight * mse_loss
+                + self.config.perceptual_weight * perceptual_loss_value
+            )
         else:
             recon_loss = mse_loss
             perceptual_loss_value = torch.tensor(0.0)
@@ -437,10 +474,16 @@ class FSQVAE(nn.Module):
 
         # Entropy regularization - encourage diverse code usage
         entropy_loss = torch.tensor(0.0, device=x.device)
-        if indices is not None and hasattr(self.config, 'entropy_weight') and self.config.entropy_weight > 0:
+        if (
+            indices is not None
+            and hasattr(self.config, "entropy_weight")
+            and self.config.entropy_weight > 0
+        ):
             # Compute code distribution in batch
             batch_size = indices.shape[0]
-            code_counts = torch.bincount(indices, minlength=self.quantizer.codebook_size).float()
+            code_counts = torch.bincount(
+                indices, minlength=self.quantizer.codebook_size
+            ).float()
             code_probs = code_counts / batch_size
 
             # Entropy of code distribution (higher = more diverse)
@@ -453,20 +496,35 @@ class FSQVAE(nn.Module):
             max_entropy = torch.log(torch.tensor(float(self.quantizer.codebook_size)))
 
             # Loss: penalize low entropy (encourage high entropy/diversity)
-            entropy_loss = -entropy  # Negative because we minimize loss but want to maximize entropy
+            entropy_loss = (
+                -entropy
+            )  # Negative because we minimize loss but want to maximize entropy
 
         # Total loss
-        total_loss = (recon_loss +
-                     self.config.beta * commitment_loss +
-                     (self.config.entropy_weight if hasattr(self.config, 'entropy_weight') else 0.0) * entropy_loss)
+        total_loss = (
+            recon_loss
+            + self.config.beta * commitment_loss
+            + (
+                self.config.entropy_weight
+                if hasattr(self.config, "entropy_weight")
+                else 0.0
+            )
+            * entropy_loss
+        )
 
         loss_dict = {
             "total_loss": total_loss.item(),
             "recon_loss": recon_loss.item(),
             "mse_loss": mse_loss.item(),
-            "perceptual_loss": perceptual_loss_value.item() if isinstance(perceptual_loss_value, torch.Tensor) else 0.0,
+            "perceptual_loss": (
+                perceptual_loss_value.item()
+                if isinstance(perceptual_loss_value, torch.Tensor)
+                else 0.0
+            ),
             "commitment_loss": commitment_loss.item(),
-            "entropy_loss": entropy_loss.item() if isinstance(entropy_loss, torch.Tensor) else 0.0,
+            "entropy_loss": (
+                entropy_loss.item() if isinstance(entropy_loss, torch.Tensor) else 0.0
+            ),
         }
 
         # Codebook usage monitoring
@@ -491,9 +549,13 @@ class FSQVAE(nn.Module):
             max_perplexity = total_codes
             perplexity_ratio = perplexity / max_perplexity
 
-            loss_dict["codebook_usage"] = codebook_usage  # Fraction of codes used at least once
+            loss_dict["codebook_usage"] = (
+                codebook_usage  # Fraction of codes used at least once
+            )
             loss_dict["unique_codes"] = unique_codes
-            loss_dict["codebook_perplexity"] = perplexity.item()  # Effective number of codes
+            loss_dict["codebook_perplexity"] = (
+                perplexity.item()
+            )  # Effective number of codes
             loss_dict["perplexity_ratio"] = perplexity_ratio.item()  # Normalized (0-1)
 
         return total_loss, loss_dict

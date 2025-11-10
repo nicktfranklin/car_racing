@@ -9,16 +9,23 @@ __version__ = "0.1.0"
 
 from .agents import Agent, HumanAgent, RandomAgent, WorldModelAgent, create_agent
 from .config import WorldModelAgentConfig
-from .data_collection import DataCollector, ImageDataset, SequenceDataset, VAEDataset, WorldModelDataset
-from .models import FSQVAE, Controller, EvolutionaryController, WorldModel
-from .training import ControllerTrainer, VAETrainer, WorldModelTrainer
+from .data_collection import (
+    DataCollector,
+    ImageDataset,
+    SequenceDataset,
+    VAEDataset,
+    WorldModelDataset,
+)
 from .lightning_training import (
+    ChunkRotationCallback,
     VAELightningModule,
     WorldModelLightningModule,
-    ChunkRotationCallback,
-    create_train_val_dataloaders,
     create_sequence_train_val_dataloaders,
+    create_train_val_dataloaders,
 )
+from .models import FSQVAE, Controller, EvolutionaryController, WorldModel
+from .training import ControllerTrainer, VAETrainer, WorldModelTrainer
+from .utils import get_logger, setup_logger
 
 __all__ = [
     "Agent",
@@ -44,4 +51,6 @@ __all__ = [
     "ChunkRotationCallback",
     "create_train_val_dataloaders",
     "create_sequence_train_val_dataloaders",
+    "setup_logger",
+    "get_logger",
 ]

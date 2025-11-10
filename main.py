@@ -17,11 +17,11 @@ from world_models import (
     ImageDataset,
     SequenceDataset,
     VAEDataset,
-    WorldModelDataset,
     VAELightningModule,
     VAETrainer,
     WorldModel,
     WorldModelAgentConfig,
+    WorldModelDataset,
     WorldModelLightningModule,
     WorldModelTrainer,
     create_sequence_train_val_dataloaders,
@@ -33,7 +33,7 @@ class TeeOutput:
     """Write to both file and original stream (stdout/stderr)."""
 
     def __init__(self, file_path, original_stream):
-        self.file = open(file_path, 'a', buffering=1)  # Line buffered
+        self.file = open(file_path, "a", buffering=1)  # Line buffered
         self.original = original_stream
 
     def write(self, data):
@@ -59,9 +59,11 @@ def setup_logging(log_file):
         os.makedirs(log_dir, exist_ok=True)
 
     # Add timestamp header to log file
-    with open(log_file, 'a') as f:
+    with open(log_file, "a") as f:
         f.write(f"\n{'='*80}\n")
-        f.write(f"Training started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(
+            f"Training started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        )
         f.write(f"{'='*80}\n\n")
 
     # Redirect stdout and stderr
@@ -249,6 +251,7 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     import lightning as L
     from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
+
     from src.world_models.lightning_training import ChunkRotationCallback
 
     # Create VAE dataset with sequential chunk loading
@@ -492,6 +495,7 @@ def train_world_model(
     # Add chunk rotation callback for WorldModelDataset
     if isinstance(dataset, WorldModelDataset):
         from src.world_models.lightning_training import ChunkRotationCallback
+
         # Rotate through chunks every epoch for WorldModelDataset
         callbacks.append(ChunkRotationCallback(epochs_per_phase=1))
         print(f"  - Chunk rotation enabled: rotating every epoch")

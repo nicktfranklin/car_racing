@@ -124,7 +124,8 @@ class FSQVAEConfig(BaseModel):
 
     # Codebook diversity (anti-collapse)
     entropy_weight: float = Field(
-        default=0.1, description="Weight for entropy regularization to encourage diverse code usage"
+        default=0.1,
+        description="Weight for entropy regularization to encourage diverse code usage",
     )
 
     # Optimizer configuration
@@ -143,7 +144,9 @@ class WorldModelConfig(BaseModel):
     # Transformer parameters
     n_layers: int = Field(default=6, description="Number of transformer layers")
     n_heads: int = Field(default=8, description="Number of attention heads")
-    num_layers: int = Field(default=6, description="Alias for n_layers (for compatibility)")
+    num_layers: int = Field(
+        default=6, description="Alias for n_layers (for compatibility)"
+    )
 
     # Input/Output dimensions
     state_dim: int = Field(
@@ -215,9 +218,12 @@ class DataConfig(BaseModel):
     num_workers: int = Field(
         default=-1, description="Number of parallel workers (-1 for auto)"
     )
-    batch_size: int = Field(default=100, description="Episodes per worker batch (deprecated)")
+    batch_size: int = Field(
+        default=100, description="Episodes per worker batch (deprecated)"
+    )
     episodes_per_batch: int = Field(
-        default=10, description="Number of episodes each worker collects before returning (higher = less overhead)"
+        default=10,
+        description="Number of episodes each worker collects before returning (higher = less overhead)",
     )
 
     # Checkpointing
@@ -272,7 +278,8 @@ class TrainingConfig(BaseModel):
 
     # VAE dataset parameters
     vae_subsample_rate: int = Field(
-        default=10, description="Subsample rate for VAE (use every Nth frame for decorrelation)"
+        default=10,
+        description="Subsample rate for VAE (use every Nth frame for decorrelation)",
     )
     vae_files_per_chunk: int = Field(
         default=5, description="Number of files to load per chunk for VAE training"
@@ -283,7 +290,8 @@ class TrainingConfig(BaseModel):
         default=4, description="Subsample rate for World Model (use every Nth frame)"
     )
     world_model_files_per_chunk: int = Field(
-        default=5, description="Number of files to load per chunk for World Model training"
+        default=5,
+        description="Number of files to load per chunk for World Model training",
     )
     world_model_sequence_length: int = Field(
         default=64, description="Sequence length for World Model training"
@@ -291,7 +299,8 @@ class TrainingConfig(BaseModel):
 
     # World Model specific parameters
     world_model_batch_size: int = Field(
-        default=32, description="Batch size for world model training (lower than VAE due to sequences)"
+        default=32,
+        description="Batch size for world model training (lower than VAE due to sequences)",
     )
     world_model_steps_per_epoch: int = Field(
         default=200, description="Number of batches per epoch for world model training"
@@ -312,7 +321,8 @@ class TrainingConfig(BaseModel):
         default="./checkpoints", description="Checkpoint directory"
     )
     log_file: Optional[str] = Field(
-        default=None, description="Optional file to log stdout/stderr (None = no file logging)"
+        default=None,
+        description="Optional file to log stdout/stderr (None = no file logging)",
     )
 
 
