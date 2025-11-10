@@ -25,7 +25,7 @@ from .lightning_training import (
 )
 from .models import FSQVAE, Controller, EvolutionaryController, WorldModel
 from .training import ControllerTrainer, VAETrainer, WorldModelTrainer
-from .utils import get_logger, setup_logger
+from .utils import get_logger, setup_logger, setup_output_logging
 
 __all__ = [
     "Agent",
@@ -53,4 +53,5 @@ __all__ = [
     "create_sequence_train_val_dataloaders",
     "setup_logger",
     "get_logger",
+    "setup_output_logging",
 ]

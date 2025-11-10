@@ -436,7 +436,9 @@ def create_train_val_dataloaders(
 
         logger.debug(f"Created chunked dataloaders:")
         logger.debug(f"  Train: sampling from current chunk ({chunk_size:,} images)")
-        logger.debug(f"  Val: {min(val_samples, chunk_size):,} samples from current chunk")
+        logger.debug(
+            f"  Val: {min(val_samples, chunk_size):,} samples from current chunk"
+        )
         logger.debug(
             f"  Note: Chunk rotates every N epochs, dataset.__len__() updates automatically"
         )
@@ -476,7 +478,9 @@ def create_train_val_dataloaders(
         logger.debug(
             f"  Train: {len(train_dataset):,} samples, {train_samples_per_epoch} batches/epoch"
         )
-        logger.debug(f"  Val: {len(val_dataset):,} samples ({val_split*100:.1f}% of data)")
+        logger.debug(
+            f"  Val: {len(val_dataset):,} samples ({val_split*100:.1f}% of data)"
+        )
 
     # Create dataloaders with worker sharding
     train_loader = DataLoader(
@@ -593,6 +597,8 @@ def create_sequence_train_val_dataloaders(
     logger.debug(
         f"  Train: {len(train_dataset):,} sequences, {train_samples_per_epoch} batches/epoch"
     )
-    logger.debug(f"  Val: {len(val_dataset):,} sequences ({val_split*100:.1f}% of data)")
+    logger.debug(
+        f"  Val: {len(val_dataset):,} sequences ({val_split*100:.1f}% of data)"
+    )
 
     return train_loader, val_loader

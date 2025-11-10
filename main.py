@@ -29,54 +29,8 @@ from world_models import (
     create_train_val_dataloaders,
     get_logger,
     setup_logger,
+    setup_output_logging,
 )
-
-
-class TeeOutput:
-    """Write to both file and original stream (stdout/stderr)."""
-
-    def __init__(self, file_path, original_stream):
-        self.file = open(file_path, "a", buffering=1)  # Line buffered
-        self.original = original_stream
-
-    def write(self, data):
-        self.file.write(data)
-        self.original.write(data)
-
-    def flush(self):
-        self.file.flush()
-        self.original.flush()
-
-    def close(self):
-        self.file.close()
-
-
-def setup_output_logging(log_file):
-    """Redirect stdout and stderr to both console and file."""
-    if log_file is None:
-        return None, None
-
-    # Create log directory if needed
-    log_dir = os.path.dirname(log_file)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-
-    # Add timestamp header to log file
-    with open(log_file, "a") as f:
-        f.write(f"\n{'='*80}\n")
-        f.write(
-            f"Training started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        )
-        f.write(f"{'='*80}\n\n")
-
-    # Redirect stdout and stderr
-    stdout_tee = TeeOutput(log_file, sys.stdout)
-    stderr_tee = TeeOutput(log_file, sys.stderr)
-
-    sys.stdout = stdout_tee
-    sys.stderr = stderr_tee
-
-    return stdout_tee, stderr_tee
 
 
 def main():
@@ -197,9 +151,9 @@ def main():
     os.makedirs(config.data.data_dir, exist_ok=True)
     os.makedirs(config.training.checkpoint_dir, exist_ok=True)
 
-    logger.info("="*50)
+    logger.info("=" * 50)
     logger.info("World Model Training Pipeline")
-    logger.info("="*50)
+    logger.info("=" * 50)
     logger.info(f"Device: {device}")
     logger.info(f"Stage: {args.stage}")
     logger.info(f"Max episode length: {config.data.max_episode_length}")
@@ -257,46 +211,20 @@ def collect_data(
 
 def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = False):
     """Train the FSQ-VAE using PyTorch Lightning."""
-    import lightning as L
-    from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-    from lightning.pytorch.loggers import TensorBoardLogger
-
-    from src.world_models.lightning_training import ChunkRotationCallback
+    from src.world_models.training import (
+        create_dataloaders,
+        create_dataset,
+        find_checkpoint_to_resume,
+        setup_callbacks,
+        setup_tensorboard,
+        setup_trainer,
+    )
 
     logger = get_logger("world_models")
 
-    # Create VAE dataset with sequential chunk loading
-    collector = DataCollector(config.data)
-    chunk_files = collector.get_chunk_files(data_file)
-
-    if chunk_files:
-        # Use new VAEDataset with sequential loading and subsampling
-        dataset = VAEDataset(
-            data_dir=config.data.data_dir,
-            chunk_files=chunk_files,
-            subsample_rate=config.training.vae_subsample_rate,
-            files_per_chunk=config.training.vae_files_per_chunk,
-        )
-    else:
-        # Fallback to loading episodes for backward compatibility
-        episodes = collector.load_episodes(data_file)
-        dataset = ImageDataset(episodes=episodes)
-
-    # Create train/val dataloaders with sequential sampling
-    pin_memory = config.training.device == "cuda"
-
-    # Use num_workers=0 for sequential chunked loading (data already in RAM)
-    num_workers = 0
-
-    train_loader, val_loader = create_train_val_dataloaders(
-        dataset=dataset,
-        batch_size=config.training.batch_size,
-        num_workers=num_workers,
-        val_split=config.training.val_split,
-        train_samples_per_epoch=config.training.steps_per_epoch,
-        val_samples=config.training.val_samples,
-        pin_memory=pin_memory,
-    )
+    # Create dataset and dataloaders
+    dataset = create_dataset("vae", config, data_file)
+    train_loader, val_loader = create_dataloaders("vae", dataset, config)
 
     # Create model and Lightning module
     vae = FSQVAE(
@@ -306,53 +234,15 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     )
     lightning_module = VAELightningModule(vae, config)
 
-    # Setup callbacks
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=os.path.join(config.training.checkpoint_dir, "vae"),
-        filename="epoch={epoch:02d}-val_loss={val/loss:.4f}",
-        monitor="val/loss",
-        mode="min",
-        save_top_k=3,
-        save_last=True,
-        auto_insert_metric_name=False,  # Don't auto-insert metric name
-    )
+    # Setup training components
+    callbacks = setup_callbacks("vae", config, dataset)
+    tb_logger = setup_tensorboard("vae", config)
+    trainer = setup_trainer("vae", config, callbacks, tb_logger)
 
-    early_stopping = EarlyStopping(
-        monitor="val/loss",
-        patience=config.training.early_stopping_patience,
-        mode="min",
-        verbose=True,
-    )
+    # Find checkpoint to resume from
+    ckpt_path = find_checkpoint_to_resume("vae", config, resume)
 
-    # Build callbacks list
-    callbacks = [checkpoint_callback, early_stopping]
-
-    # Add chunk rotation callback for VAEDataset
-    if isinstance(dataset, VAEDataset):
-        # Rotate through chunks every epoch for VAEDataset
-        callbacks.append(ChunkRotationCallback(epochs_per_phase=1))
-        logger.debug("Chunk rotation enabled: rotating every epoch")
-
-    # Setup TensorBoard logger
-    tb_logger = TensorBoardLogger(
-        save_dir=config.training.checkpoint_dir,
-        name="vae_logs",
-        version=None,  # Auto-increment version
-    )
-
-    # Create trainer
-    trainer = L.Trainer(
-        max_epochs=config.training.train_vae_epochs,
-        callbacks=callbacks,
-        logger=tb_logger,
-        accelerator="auto",
-        devices=1,
-        log_every_n_steps=config.training.log_every,
-        val_check_interval=1.0,  # Validate every epoch
-        enable_progress_bar=True,
-    )
-
-    # Train
+    # Log training info
     logger.info(
         f"Training VAE with Lightning (max {config.training.train_vae_epochs} epochs)..."
     )
@@ -366,15 +256,11 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
         f"Early stopping patience: {config.training.early_stopping_patience} epochs"
     )
 
-    ckpt_path = None
-    if resume:
-        last_ckpt = os.path.join(config.training.checkpoint_dir, "vae", "last.ckpt")
-        if os.path.exists(last_ckpt):
-            ckpt_path = last_ckpt
-            logger.info(f"Resuming from {ckpt_path}")
-
+    # Train
     trainer.fit(lightning_module, train_loader, val_loader, ckpt_path=ckpt_path)
 
+    # Log completion
+    checkpoint_callback = callbacks[0]  # ModelCheckpoint is first callback
     logger.info("VAE training completed!")
     logger.info(f"Best checkpoint: {checkpoint_callback.best_model_path}")
     logger.info(f"TensorBoard logs saved to: {tb_logger.log_dir}")
@@ -391,154 +277,39 @@ def train_world_model(
     config: WorldModelAgentConfig, data_file: str, resume: bool = False
 ):
     """Train the world model using Lightning."""
-    import lightning as L
-    from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
-    from lightning.pytorch.loggers import TensorBoardLogger
+    from src.world_models.training import (
+        CheckpointManager,
+        create_dataloaders,
+        create_dataset,
+        find_checkpoint_to_resume,
+        setup_callbacks,
+        setup_tensorboard,
+        setup_trainer,
+    )
 
     logger = get_logger("world_models")
 
-    # Create WorldModelDataset with sequential chunk loading
-    collector = DataCollector(config.data)
-    chunk_files = collector.get_chunk_files(data_file)
+    # Create dataset and dataloaders
+    dataset = create_dataset("world_model", config, data_file)
+    train_loader, val_loader = create_dataloaders("world_model", dataset, config)
 
-    if chunk_files:
-        # Use new WorldModelDataset with sequential loading and subsampling
-        dataset = WorldModelDataset(
-            data_dir=config.data.data_dir,
-            chunk_files=chunk_files,
-            sequence_length=config.training.world_model_sequence_length,
-            subsample_rate=config.training.world_model_subsample_rate,
-            files_per_chunk=config.training.world_model_files_per_chunk,
-        )
-    else:
-        # Fallback to loading episodes for backward compatibility
-        episodes = collector.load_episodes(data_file)
-        dataset = SequenceDataset(episodes, config.world_model.sequence_length)
-
-    # Create train/val dataloaders with sequential sampling
-    pin_memory = config.training.device == "cuda"
-
-    # Use num_workers=0 for sequential chunked loading (data already in RAM)
-    num_workers = 0
-
-    train_loader, val_loader = create_sequence_train_val_dataloaders(
-        dataset=dataset,
-        batch_size=config.training.world_model_batch_size,
-        num_workers=num_workers,
-        val_split=config.training.val_split,
-        train_samples_per_epoch=config.training.world_model_steps_per_epoch,
-        val_samples=config.training.world_model_val_samples,
-        pin_memory=pin_memory,
-    )
-
-    # Load trained VAE
-    vae = FSQVAE(
-        config.fsq_vae,
-        use_perceptual_loss=config.fsq_vae.use_perceptual_loss,
-        device=config.training.device,
-    )
-
-    # Try loading from Lightning checkpoint first
-    # Try last-v1.ckpt first (new architecture), then last.ckpt (could be old or new)
-    vae_lightning_checkpoint_v1 = os.path.join(
-        config.training.checkpoint_dir, "vae", "last-v1.ckpt"
-    )
-    vae_lightning_checkpoint = os.path.join(
-        config.training.checkpoint_dir, "vae", "last.ckpt"
-    )
-    vae_legacy_checkpoint = os.path.join(
-        config.training.checkpoint_dir, "vae_latest.pth"
-    )
-
-    if os.path.exists(vae_lightning_checkpoint_v1):
-        logger.info(
-            f"Loading VAE from Lightning checkpoint (v1): {vae_lightning_checkpoint_v1}"
-        )
-        vae_module = VAELightningModule.load_from_checkpoint(
-            vae_lightning_checkpoint_v1, model=vae, config=config
-        )
-        vae = vae_module.model
-        logger.info("Loaded trained VAE from Lightning checkpoint (v1)")
-    elif os.path.exists(vae_lightning_checkpoint):
-        logger.info(f"Loading VAE from Lightning checkpoint: {vae_lightning_checkpoint}")
-        vae_module = VAELightningModule.load_from_checkpoint(
-            vae_lightning_checkpoint, model=vae, config=config
-        )
-        vae = vae_module.model
-        logger.info("Loaded trained VAE from Lightning checkpoint")
-    elif os.path.exists(vae_legacy_checkpoint):
-        logger.info(f"Loading VAE from legacy checkpoint: {vae_legacy_checkpoint}")
-        from src.world_models import VAETrainer
-
-        vae_trainer = VAETrainer(vae, config)
-        vae_trainer.load_checkpoint(vae_legacy_checkpoint)
-        logger.info("Loaded trained VAE from legacy checkpoint")
-    else:
-        logger.warning("No trained VAE found. Training world model with random VAE.")
+    # Load trained VAE using CheckpointManager
+    ckpt_manager = CheckpointManager(config)
+    vae = ckpt_manager.load_vae(use_perceptual_loss=False)
 
     # Create world model and Lightning module
     world_model = WorldModel(config.world_model)
     lightning_module = WorldModelLightningModule(world_model, vae, config)
 
-    # Setup callbacks
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=os.path.join(config.training.checkpoint_dir, "world_model"),
-        filename="epoch={epoch:02d}-val_loss={val/loss:.4f}",
-        monitor="val/loss",
-        mode="min",
-        save_top_k=3,
-        save_last=True,
-        auto_insert_metric_name=False,  # Don't auto-insert metric name
-    )
+    # Setup training components
+    callbacks = setup_callbacks("world_model", config, dataset)
+    tb_logger = setup_tensorboard("world_model", config)
+    trainer = setup_trainer("world_model", config, callbacks, tb_logger)
 
-    early_stopping = EarlyStopping(
-        monitor="val/loss",
-        patience=config.training.early_stopping_patience,
-        mode="min",
-    )
+    # Find checkpoint to resume from
+    ckpt_path = find_checkpoint_to_resume("world_model", config, resume)
 
-    # Build callbacks list
-    callbacks = [checkpoint_callback, early_stopping]
-
-    # Add chunk rotation callback for WorldModelDataset
-    if isinstance(dataset, WorldModelDataset):
-        from src.world_models.lightning_training import ChunkRotationCallback
-
-        # Rotate through chunks every epoch for WorldModelDataset
-        callbacks.append(ChunkRotationCallback(epochs_per_phase=1))
-        logger.debug("Chunk rotation enabled: rotating every epoch")
-
-    # Setup TensorBoard logger
-    tb_logger = TensorBoardLogger(
-        save_dir=config.training.checkpoint_dir,
-        name="world_model_logs",
-        version=None,  # Auto-increment version
-    )
-
-    # Create trainer
-    trainer = L.Trainer(
-        max_epochs=config.training.train_world_model_epochs,
-        accelerator="auto",
-        devices=1,
-        callbacks=callbacks,
-        logger=tb_logger,
-        limit_train_batches=config.training.world_model_steps_per_epoch,
-        val_check_interval=1.0,
-        log_every_n_steps=50,
-        enable_progress_bar=True,
-    )
-
-    # Determine checkpoint path for resuming
-    ckpt_path = None
-    if resume:
-        last_ckpt = os.path.join(
-            config.training.checkpoint_dir, "world_model", "last.ckpt"
-        )
-        if os.path.exists(last_ckpt):
-            ckpt_path = last_ckpt
-            logger.info(f"Resuming world model training from {ckpt_path}")
-
-    # Train
+    # Log training info
     logger.info(
         "Training World Model with Lightning (max {} epochs)...".format(
             config.training.train_world_model_epochs
@@ -555,8 +326,11 @@ def train_world_model(
         f"Early stopping patience: {config.training.early_stopping_patience} epochs"
     )
 
+    # Train
     trainer.fit(lightning_module, train_loader, val_loader, ckpt_path=ckpt_path)
 
+    # Log completion
+    checkpoint_callback = callbacks[0]  # ModelCheckpoint is first callback
     logger.info("World model training completed!")
     logger.info(f"Best checkpoint: {checkpoint_callback.best_model_path}")
     logger.info(f"TensorBoard logs saved to: {tb_logger.log_dir}")
@@ -571,32 +345,14 @@ def train_world_model(
 
 def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     """Train the controller."""
+    from src.world_models.training import CheckpointManager
+
     logger = get_logger("world_models")
-    device = config.training.device
-    # Load trained models
-    vae = FSQVAE(
-        config.fsq_vae, use_perceptual_loss=False, device=device
-    )  # No perceptual loss needed for inference
-    world_model = WorldModel(config.world_model)
 
-    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
-    wm_checkpoint_path = os.path.join(
-        config.training.checkpoint_dir, "world_model_latest.pth"
-    )
-
-    if os.path.exists(vae_checkpoint_path):
-        vae_trainer = VAETrainer(vae, config)
-        vae_trainer.load_checkpoint(vae_checkpoint_path)
-        logger.info("Loaded trained VAE")
-    else:
-        logger.warning("No trained VAE found.")
-
-    if os.path.exists(wm_checkpoint_path):
-        wm_trainer = WorldModelTrainer(world_model, vae, config)
-        wm_trainer.load_checkpoint(wm_checkpoint_path)
-        logger.info("Loaded trained world model")
-    else:
-        logger.warning("No trained world model found.")
+    # Load trained models using CheckpointManager
+    ckpt_manager = CheckpointManager(config)
+    vae = ckpt_manager.load_vae(use_perceptual_loss=False)
+    world_model = ckpt_manager.load_world_model()
 
     # Create controller trainer
     trainer = ControllerTrainer(vae, world_model, config)
@@ -634,29 +390,21 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
     """Evaluate the trained agent in the real environment."""
     import gymnasium as gym
 
+    from src.world_models.training import CheckpointManager
     from world_models import EvolutionaryController
 
     logger = get_logger("world_models")
     device = config.training.device
-    # Load trained models
-    vae = FSQVAE(
-        config.fsq_vae, use_perceptual_loss=False, device=device
-    )  # No perceptual loss needed for inference
-    controller = EvolutionaryController(config.controller)
 
-    # Load checkpoints
-    vae_checkpoint_path = os.path.join(config.training.checkpoint_dir, "vae_latest.pth")
+    # Load trained VAE using CheckpointManager
+    ckpt_manager = CheckpointManager(config)
+    vae = ckpt_manager.load_vae(use_perceptual_loss=False)
+
+    # Load controller
+    controller = EvolutionaryController(config.controller)
     controller_checkpoint_path = os.path.join(
         config.training.checkpoint_dir, "best_controller.pth"
     )
-
-    if os.path.exists(vae_checkpoint_path):
-        vae_trainer = VAETrainer(vae, config)
-        vae_trainer.load_checkpoint(vae_checkpoint_path)
-        logger.info("Loaded trained VAE")
-    else:
-        logger.error("No trained VAE found!")
-        return
 
     if os.path.exists(controller_checkpoint_path):
         controller.load_state_dict(torch.load(controller_checkpoint_path))
