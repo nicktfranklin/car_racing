@@ -28,59 +28,23 @@ def load_vae(
     config: WorldModelAgentConfig, checkpoint_dir: str = "./checkpoints", device="cpu"
 ):
     """Load trained VAE from checkpoint."""
-    # Load with perceptual loss to match checkpoint, but we won't use it for inference
-    vae = FSQVAE(
-        config.fsq_vae,
-        use_perceptual_loss=config.fsq_vae.use_perceptual_loss,
-        device=device,
-    )
+    # Use CheckpointManager for centralized checkpoint loading
+    from world_models.training import CheckpointManager
 
-    # Try different checkpoint locations (newest first)
-    # 1. Try last-v2.ckpt first (newest single-code architecture)
-    last_v2_ckpt = os.path.join(checkpoint_dir, "vae", "last-v2.ckpt")
-    # 2. Try last-v1.ckpt (spatial architecture)
-    last_v1_ckpt = os.path.join(checkpoint_dir, "vae", "last-v1.ckpt")
-    # 3. Try last.ckpt (oldest)
-    last_ckpt = os.path.join(checkpoint_dir, "vae", "last.ckpt")
-    # 4. Find best checkpoint in vae directory
-    vae_dir = os.path.join(checkpoint_dir, "vae")
+    # Temporarily set checkpoint_dir in config
+    original_checkpoint_dir = config.training.checkpoint_dir
+    config.training.checkpoint_dir = checkpoint_dir
 
-    checkpoint_path = None
-
-    if os.path.exists(last_v2_ckpt):
-        checkpoint_path = last_v2_ckpt
-        print(f"Loading VAE from last checkpoint (v2): {checkpoint_path}")
-    elif os.path.exists(last_v1_ckpt):
-        checkpoint_path = last_v1_ckpt
-        print(f"Loading VAE from last checkpoint (v1): {checkpoint_path}")
-    elif os.path.exists(last_ckpt):
-        checkpoint_path = last_ckpt
-        print(f"Loading VAE from last checkpoint: {checkpoint_path}")
-    elif os.path.exists(vae_dir):
-        # Find best checkpoint based on filename
-        import glob
-
-        ckpt_files = glob.glob(os.path.join(vae_dir, "epoch=*.ckpt"))
-        if ckpt_files:
-            # Sort by validation loss in filename
-            ckpt_files.sort()
-            checkpoint_path = ckpt_files[0]  # First one should have lowest loss
-            print(f"Loading VAE from best checkpoint: {checkpoint_path}")
-
-    if checkpoint_path and os.path.exists(checkpoint_path):
-        vae_module = VAELightningModule.load_from_checkpoint(
-            checkpoint_path, model=vae, config=config, map_location=device
+    try:
+        ckpt_manager = CheckpointManager(config)
+        vae = ckpt_manager.load_vae(
+            use_perceptual_loss=config.fsq_vae.use_perceptual_loss, device=device
         )
-        vae = vae_module.model
-    else:
-        raise FileNotFoundError(
-            f"No VAE checkpoint found. Tried:\n"
-            f"  - {last_ckpt}\n"
-            f"  - {vae_dir}/epoch=*.ckpt"
-        )
-
-    vae.eval()
-    return vae
+        vae.eval()
+        return vae
+    finally:
+        # Restore original checkpoint_dir
+        config.training.checkpoint_dir = original_checkpoint_dir
 
 
 def sample_random_latents(vae: FSQVAE, num_samples: int = 16, device="cpu"):
@@ -127,7 +91,7 @@ def get_reconstructions(
     with torch.no_grad():
         for idx in indices:
             img = dataset[idx].unsqueeze(0).to(device)
-            recon, _, _ = vae(img)
+            recon, _, _, _, _ = vae(img)
 
             originals.append(img.cpu())
             reconstructions.append(recon.cpu())
@@ -157,14 +121,14 @@ def interpolate_latents(
             z_interp = (1 - alpha) * z1 + alpha * z2
 
             # Quantize and decode
-            z_q, _ = vae.quantizer(z_interp)
+            z_q, _, _ = vae.quantizer(z_interp)
             img_interp = vae.decode(z_q)
             interpolations.append(img_interp.cpu())
 
     return torch.cat([img1.cpu()] + interpolations + [img2.cpu()], dim=0)
 
 
-def plot_images(images: torch.Tensor, title: str, save_path: str = None, nrow: int = 8):
+def plot_images(images: torch.Tensor, title: str, save_path: str, nrow: int = 8):
     """Plot a grid of images."""
     # Convert from (N, C, H, W) to (N, H, W, C)
     images = images.permute(0, 2, 3, 1).numpy()
@@ -190,15 +154,12 @@ def plot_images(images: torch.Tensor, title: str, save_path: str = None, nrow: i
     plt.suptitle(title, fontsize=16)
     plt.tight_layout()
 
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"Saved to {save_path}")
-
-    plt.show()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved to {save_path}")
 
 
 def plot_reconstruction_comparison(
-    originals: torch.Tensor, reconstructions: torch.Tensor, save_path: str = None
+    originals: torch.Tensor, reconstructions: torch.Tensor, save_path: str
 ):
     """Plot original vs reconstructed images side by side."""
     # Convert from (N, C, H, W) to (N, H, W, C)
@@ -226,11 +187,8 @@ def plot_reconstruction_comparison(
     plt.suptitle("VAE Reconstructions", fontsize=16)
     plt.tight_layout()
 
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches="tight")
-        print(f"Saved to {save_path}")
-
-    plt.show()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    print(f"Saved to {save_path}")
 
 
 def main():
