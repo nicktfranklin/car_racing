@@ -60,6 +60,15 @@ class VAETrainer:
         print(f"VAETrainer using device: {self.device}")
 
         self.model.to(self.device)
+
+        # Print model architecture and parameters
+        print_model_info(self.model, "FSQ-VAE")
+        print(f"Codebook size: {self.model.quantizer.codebook_size}")
+        print(f"FSQ levels: {self.model.config.fsq_levels}")
+        print(f"Latent dimension: {self.model.config.latent_dim}")
+        print(f"Learning rate: {config.fsq_vae.learning_rate}")
+        print(f"Beta (commitment weight): {config.fsq_vae.beta}\n")
+
         self.optimizer = optim.Adam(
             self.model.parameters(), lr=config.fsq_vae.learning_rate
         )
@@ -171,6 +180,16 @@ class WorldModelTrainer:
         self.vae.to(self.device)
         self.vae.eval()  # Keep VAE in eval mode
 
+        # Print model architecture and parameters
+        print_model_info(self.world_model, "World Model (GPT-2)")
+        print(f"Vocabulary size: {self.world_model.VOCAB_SIZE}")
+        print(f"Tokens per timestep: {self.world_model.tokens_per_timestep}")
+        print(f"Hidden size: {config.world_model.hidden_size}")
+        print(f"Number of layers: {getattr(config.world_model, 'n_layers', 6)}")
+        print(f"Number of heads: {getattr(config.world_model, 'n_heads', 8)}")
+        print(f"Learning rate: {config.world_model.learning_rate}")
+        print(f"Dropout: {config.world_model.dropout}\n")
+
         self.optimizer = optim.Adam(
             self.world_model.parameters(), lr=config.world_model.learning_rate
         )
@@ -182,6 +201,7 @@ class WorldModelTrainer:
         # Optimize dataloader for device
         pin_memory = self.device.type == "cuda"  # Only pin memory for CUDA
         num_workers = 0 if self.device.type == "mps" else 2  # Reduce workers for MPS
+        persistent_workers = num_workers > 0
 
         dataloader = DataLoader(
             dataset,
@@ -189,6 +209,8 @@ class WorldModelTrainer:
             shuffle=True,
             num_workers=num_workers,
             pin_memory=pin_memory,
+            persistent_workers=persistent_workers,
+            prefetch_factor=2 if num_workers > 0 else None,
         )
 
         self.world_model.train()
@@ -328,6 +350,14 @@ class ControllerTrainer:
             EvolutionaryController(config.controller).to(self.device)
             for _ in range(self.population_size)
         ]
+
+        # Print controller architecture and parameters
+        print_model_info(self.population[0], "Evolutionary Controller")
+        print(f"Population size: {self.population_size}")
+        print(f"Elite size: {self.num_elite}")
+        print(f"Mutation strength: {self.mutation_strength}")
+        print(f"State dimension: {config.controller.state_dim}")
+        print(f"Action dimension: {config.controller.action_dim}\n")
 
     def train(self, num_generations: int) -> Dict[str, List[float]]:
         """Train controllers using evolutionary strategy."""

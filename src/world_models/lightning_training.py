@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 
 import lightning as L
 import torch
+import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
 
@@ -24,6 +25,27 @@ from .models.world_model import WorldModel
 from .utils import get_logger
 
 logger = get_logger("world_models")
+
+
+def print_model_info(model: nn.Module, model_name: str):
+    """Print model architecture and parameter count."""
+    print(f"\n{'=' * 60}")
+    print(f"{model_name} Architecture")
+    print(f"{'=' * 60}")
+
+    # Count parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
+    print(f"Non-trainable parameters: {total_params - trainable_params:,}")
+    print(f"Model size (MB): {total_params * 4 / 1024 / 1024:.2f}")
+
+    # Print model structure
+    print(f"\nModel structure:")
+    print(model)
+    print(f"{'=' * 60}\n")
 
 
 def create_optimizer(parameters, opt_config: OptimizerConfig):
@@ -128,6 +150,15 @@ class VAELightningModule(L.LightningModule):
             and self.model.perceptual_loss is not None
         ):
             self.model.perceptual_loss = self.model.perceptual_loss.to(self.device)
+
+        # Print model architecture and parameters
+        print_model_info(self.model, "FSQ-VAE (Lightning)")
+        print(f"Codebook size: {self.model.quantizer.codebook_size}")
+        print(f"FSQ levels: {self.model.config.fsq_levels}")
+        print(f"Latent dimension: {self.model.config.latent_dim}")
+        print(f"Optimizer: {config.fsq_vae.optimizer.optimizer}")
+        print(f"Learning rate: {config.fsq_vae.optimizer.learning_rate}")
+        print(f"Beta (commitment weight): {config.fsq_vae.beta}\n")
 
     def forward(self, x):
         return self.model(x)
@@ -238,6 +269,17 @@ class WorldModelLightningModule(L.LightningModule):
         self.vae.eval()  # Keep VAE frozen
         self.config = config
         self.save_hyperparameters(ignore=["world_model", "vae"])
+
+        # Print model architecture and parameters
+        print_model_info(self.world_model, "World Model GPT-2 (Lightning)")
+        print(f"Vocabulary size: {self.world_model.VOCAB_SIZE}")
+        print(f"Tokens per timestep: {self.world_model.tokens_per_timestep}")
+        print(f"Hidden size: {config.world_model.hidden_size}")
+        print(f"Number of layers: {getattr(config.world_model, 'n_layers', 6)}")
+        print(f"Number of heads: {getattr(config.world_model, 'n_heads', 8)}")
+        print(f"Optimizer: {config.world_model.optimizer.optimizer}")
+        print(f"Learning rate: {config.world_model.optimizer.learning_rate}")
+        print(f"Dropout: {config.world_model.dropout}\n")
 
     def training_step(self, batch, batch_idx):
         observations = batch["observations"]  # (B, T+1, C, H, W)

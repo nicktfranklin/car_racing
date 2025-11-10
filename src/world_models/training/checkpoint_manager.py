@@ -94,7 +94,7 @@ class CheckpointManager:
             from ..lightning_training import VAELightningModule
 
             vae_module = VAELightningModule.load_from_checkpoint(
-                checkpoint_path, model=vae, config=self.config
+                checkpoint_path, model=vae, config=self.config, strict=False
             )
             vae = vae_module.model
             logger.info("Loaded trained VAE from Lightning checkpoint")

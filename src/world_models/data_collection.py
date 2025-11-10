@@ -1436,14 +1436,20 @@ class WorldModelDataset(torch.utils.data.Dataset):
             actual_frame_indices = [start_frame + offset for offset in frame_indices]
             actual_action_indices = [start_frame + offset for offset in action_indices]
 
-            # Load and normalize observations directly (uint8 → float32 / 255)
-            obs_uint8 = ep_group["observations"][actual_frame_indices]
-            observations[seq_idx] = obs_uint8.astype(np.float32) / 255.0
+            # Load observations sequentially instead of fancy indexing
+            # This avoids slow HDF5 fancy indexing that can cause blocking I/O
+            obs_dataset = ep_group["observations"]
+            for j, frame_idx in enumerate(actual_frame_indices):
+                observations[seq_idx, j] = obs_dataset[frame_idx].astype(np.float32) / 255.0
 
-            # Load other data
-            actions[seq_idx] = ep_group["actions"][actual_action_indices]
-            rewards[seq_idx] = ep_group["rewards"][actual_action_indices]
-            dones[seq_idx] = ep_group["dones"][actual_action_indices]
+            # Load other data sequentially
+            actions_dataset = ep_group["actions"]
+            rewards_dataset = ep_group["rewards"]
+            dones_dataset = ep_group["dones"]
+            for j, action_idx in enumerate(actual_action_indices):
+                actions[seq_idx, j] = actions_dataset[action_idx]
+                rewards[seq_idx, j] = rewards_dataset[action_idx]
+                dones[seq_idx, j] = dones_dataset[action_idx]
 
             seq_idx += 1
 
