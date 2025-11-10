@@ -9,13 +9,14 @@ Provides efficient training with:
 - Early stopping based on validation loss
 """
 
-import torch
-import torch.optim as optim
-import lightning as L
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
 from typing import Dict, List, Optional
 
-from .config import WorldModelAgentConfig, OptimizerConfig
+import lightning as L
+import torch
+import torch.optim as optim
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
+
+from .config import OptimizerConfig, WorldModelAgentConfig
 from .data_collection import ImageDataset, SequenceDataset
 from .models.fsq_vae import FSQVAE
 from .models.world_model import WorldModel
@@ -118,7 +119,10 @@ class VAELightningModule(L.LightningModule):
         self.save_hyperparameters(ignore=["model"])
 
         # Move perceptual loss to correct device if it exists
-        if hasattr(self.model, 'perceptual_loss') and self.model.perceptual_loss is not None:
+        if (
+            hasattr(self.model, "perceptual_loss")
+            and self.model.perceptual_loss is not None
+        ):
             self.model.perceptual_loss = self.model.perceptual_loss.to(self.device)
 
     def forward(self, x):
@@ -137,7 +141,9 @@ class VAELightningModule(L.LightningModule):
         self.log("train/recon_loss", loss_dict["recon_loss"], prog_bar=True)
         self.log("train/mse_loss", loss_dict["mse_loss"])
         if "perceptual_loss" in loss_dict:
-            self.log("train/perceptual_loss", loss_dict["perceptual_loss"])
+            self.log(
+                "train/perceptual_loss", loss_dict["perceptual_loss"], prog_bar=False
+            )
 
         # Other losses
         self.log("train/commitment_loss", loss_dict["commitment_loss"])
@@ -150,7 +156,11 @@ class VAELightningModule(L.LightningModule):
             self.log("train/unique_codes", loss_dict["unique_codes"])
         if "codebook_perplexity" in loss_dict:
             # Perplexity is the key metric - show in progress bar
-            self.log("train/codebook_perplexity", loss_dict["codebook_perplexity"], prog_bar=True)
+            self.log(
+                "train/codebook_perplexity",
+                loss_dict["codebook_perplexity"],
+                prog_bar=False,
+            )
             self.log("train/perplexity_ratio", loss_dict["perplexity_ratio"])
 
         return loss
@@ -181,13 +191,19 @@ class VAELightningModule(L.LightningModule):
             self.log("val/unique_codes", loss_dict["unique_codes"])
         if "codebook_perplexity" in loss_dict:
             # Perplexity is the key metric for collapse detection
-            self.log("val/codebook_perplexity", loss_dict["codebook_perplexity"], prog_bar=True)
+            self.log(
+                "val/codebook_perplexity",
+                loss_dict["codebook_perplexity"],
+                prog_bar=True,
+            )
             self.log("val/perplexity_ratio", loss_dict["perplexity_ratio"])
 
         return loss
 
     def configure_optimizers(self):
-        optimizer = create_optimizer(self.model.parameters(), self.config.fsq_vae.optimizer)
+        optimizer = create_optimizer(
+            self.model.parameters(), self.config.fsq_vae.optimizer
+        )
 
         # Apply gradient clipping if configured
         if self.config.fsq_vae.optimizer.grad_clip_norm is not None:
@@ -195,7 +211,9 @@ class VAELightningModule(L.LightningModule):
 
         # Create scheduler if configured
         scheduler = create_scheduler(
-            optimizer, self.config.fsq_vae.optimizer, self.config.training.train_vae_epochs
+            optimizer,
+            self.config.fsq_vae.optimizer,
+            self.config.training.train_vae_epochs,
         )
 
         if scheduler is None:
@@ -230,10 +248,12 @@ class WorldModelLightningModule(L.LightningModule):
             obs_flat = observations.reshape(-1, *observations.shape[2:])
             z_q, indices, tokens = self.vae.encode(obs_flat)
             # tokens: (B*(T+1), fsq_dim) with per-dimension discrete tokens
-            tokens = tokens.reshape(batch_size, seq_len_plus_one, -1)  # (B, T+1, fsq_dim)
+            tokens = tokens.reshape(
+                batch_size, seq_len_plus_one, -1
+            )  # (B, T+1, fsq_dim)
 
         current_state_tokens = tokens[:, :-1]  # (B, T, fsq_dim)
-        next_state_tokens = tokens[:, 1:]      # (B, T, fsq_dim)
+        next_state_tokens = tokens[:, 1:]  # (B, T, fsq_dim)
 
         # Forward pass
         loss, loss_dict = self.world_model.compute_loss(
@@ -261,10 +281,12 @@ class WorldModelLightningModule(L.LightningModule):
             obs_flat = observations.reshape(-1, *observations.shape[2:])
             z_q, indices, tokens = self.vae.encode(obs_flat)
             # tokens: (B*(T+1), fsq_dim) with per-dimension discrete tokens
-            tokens = tokens.reshape(batch_size, seq_len_plus_one, -1)  # (B, T+1, fsq_dim)
+            tokens = tokens.reshape(
+                batch_size, seq_len_plus_one, -1
+            )  # (B, T+1, fsq_dim)
 
         current_state_tokens = tokens[:, :-1]  # (B, T, fsq_dim)
-        next_state_tokens = tokens[:, 1:]      # (B, T, fsq_dim)
+        next_state_tokens = tokens[:, 1:]  # (B, T, fsq_dim)
 
         loss, loss_dict = self.world_model.compute_loss(
             current_state_tokens, next_state_tokens, actions, rewards, dones
@@ -328,15 +350,15 @@ class ChunkRotationCallback(L.Callback):
         if (trainer.current_epoch + 1) % self.epochs_per_phase == 0:
             # Access the dataset (accounting for Subset wrapper from train/val split)
             train_dataloader = trainer.train_dataloader
-            if hasattr(train_dataloader, 'dataset'):
+            if hasattr(train_dataloader, "dataset"):
                 dataset = train_dataloader.dataset
                 # Unwrap Subset to get the underlying dataset (for non-chunked mode)
-                if hasattr(dataset, 'dataset'):
+                if hasattr(dataset, "dataset"):
                     dataset = dataset.dataset
                 # Call rotation method if available (supports both old and new datasets)
-                if hasattr(dataset, 'rotate_to_next_chunk_group'):
+                if hasattr(dataset, "rotate_to_next_chunk_group"):
                     dataset.rotate_to_next_chunk_group()
-                elif hasattr(dataset, 'load_next_chunk'):
+                elif hasattr(dataset, "load_next_chunk"):
                     dataset.load_next_chunk()
 
 
@@ -347,14 +369,15 @@ def worker_init_fn(worker_id):
     reducing memory from 200 files × 8 workers to ~25 files × 8 workers.
     """
     import torch.utils.data
+
     worker_info = torch.utils.data.get_worker_info()
     if worker_info is not None:
         dataset = worker_info.dataset
         # Handle Subset wrapper (used for train/val split)
-        if hasattr(dataset, 'dataset'):
+        if hasattr(dataset, "dataset"):
             dataset = dataset.dataset
         # Set worker shard if dataset supports it
-        if hasattr(dataset, 'set_worker_shard'):
+        if hasattr(dataset, "set_worker_shard"):
             dataset.set_worker_shard(worker_info.id, worker_info.num_workers)
 
 
@@ -385,7 +408,7 @@ def create_train_val_dataloaders(
     Returns:
         train_loader, val_loader
     """
-    using_chunking = hasattr(dataset, 'use_chunking') and dataset.use_chunking
+    using_chunking = hasattr(dataset, "use_chunking") and dataset.use_chunking
 
     if using_chunking:
         # Chunked mode: dataset.__len__() returns current chunk size
@@ -399,7 +422,9 @@ def create_train_val_dataloaders(
 
         # Train: random sampling from current chunk
         train_sampler = RandomSampler(
-            train_dataset, replacement=True, num_samples=train_samples_per_epoch * batch_size
+            train_dataset,
+            replacement=True,
+            num_samples=train_samples_per_epoch * batch_size,
         )
 
         # Validation: sequential sample from current chunk
@@ -408,7 +433,9 @@ def create_train_val_dataloaders(
         print(f"Created chunked dataloaders:")
         print(f"  Train: sampling from current chunk ({chunk_size:,} images)")
         print(f"  Val: {min(val_samples, chunk_size):,} samples from current chunk")
-        print(f"  Note: Chunk rotates every N epochs, dataset.__len__() updates automatically")
+        print(
+            f"  Note: Chunk rotates every N epochs, dataset.__len__() updates automatically"
+        )
     else:
         # Non-chunked mode: standard train/val split
         dataset_size = len(dataset)
@@ -428,7 +455,9 @@ def create_train_val_dataloaders(
 
         # Create samplers - RandomSampler with replacement for infinite sampling
         train_sampler = RandomSampler(
-            train_dataset, replacement=True, num_samples=train_samples_per_epoch * batch_size
+            train_dataset,
+            replacement=True,
+            num_samples=train_samples_per_epoch * batch_size,
         )
 
         # Validation uses a fixed subset WITHOUT shuffling (sequential for reproducibility)
@@ -440,7 +469,9 @@ def create_train_val_dataloaders(
         val_sampler = SequentialSampler(val_dataset)
 
         print(f"Created dataloaders:")
-        print(f"  Train: {len(train_dataset):,} samples, {train_samples_per_epoch} batches/epoch")
+        print(
+            f"  Train: {len(train_dataset):,} samples, {train_samples_per_epoch} batches/epoch"
+        )
         print(f"  Val: {len(val_dataset):,} samples ({val_split*100:.1f}% of data)")
 
     # Create dataloaders with worker sharding
@@ -452,7 +483,9 @@ def create_train_val_dataloaders(
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
         prefetch_factor=4 if num_workers > 0 else None,
-        worker_init_fn=worker_init_fn if num_workers > 0 else None,  # Shard files across workers
+        worker_init_fn=(
+            worker_init_fn if num_workers > 0 else None
+        ),  # Shard files across workers
     )
 
     val_loader = DataLoader(
@@ -463,11 +496,15 @@ def create_train_val_dataloaders(
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
         prefetch_factor=4 if num_workers > 0 else None,
-        worker_init_fn=worker_init_fn if num_workers > 0 else None,  # Shard files across workers
+        worker_init_fn=(
+            worker_init_fn if num_workers > 0 else None
+        ),  # Shard files across workers
     )
 
     print(f"Created dataloaders:")
-    print(f"  Train: {len(train_dataset):,} samples, {train_samples_per_epoch} batches/epoch")
+    print(
+        f"  Train: {len(train_dataset):,} samples, {train_samples_per_epoch} batches/epoch"
+    )
     print(f"  Val: {len(val_dataset):,} samples ({val_split*100:.1f}% of data)")
 
     return train_loader, val_loader
@@ -516,7 +553,9 @@ def create_sequence_train_val_dataloaders(
 
     # Create samplers - RandomSampler with replacement for infinite sampling
     train_sampler = RandomSampler(
-        train_dataset, replacement=True, num_samples=train_samples_per_epoch * batch_size
+        train_dataset,
+        replacement=True,
+        num_samples=train_samples_per_epoch * batch_size,
     )
 
     # Validation uses a fixed subset WITHOUT shuffling
@@ -534,7 +573,9 @@ def create_sequence_train_val_dataloaders(
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
         prefetch_factor=4 if num_workers > 0 else None,
-        worker_init_fn=worker_init_fn if num_workers > 0 else None,  # Shard files across workers
+        worker_init_fn=(
+            worker_init_fn if num_workers > 0 else None
+        ),  # Shard files across workers
     )
 
     val_loader = DataLoader(
@@ -545,11 +586,15 @@ def create_sequence_train_val_dataloaders(
         pin_memory=pin_memory,
         persistent_workers=num_workers > 0,
         prefetch_factor=4 if num_workers > 0 else None,
-        worker_init_fn=worker_init_fn if num_workers > 0 else None,  # Shard files across workers
+        worker_init_fn=(
+            worker_init_fn if num_workers > 0 else None
+        ),  # Shard files across workers
     )
 
     print(f"Created sequence dataloaders:")
-    print(f"  Train: {len(train_dataset):,} sequences, {train_samples_per_epoch} batches/epoch")
+    print(
+        f"  Train: {len(train_dataset):,} sequences, {train_samples_per_epoch} batches/epoch"
+    )
     print(f"  Val: {len(val_dataset):,} sequences ({val_split*100:.1f}% of data)")
 
     return train_loader, val_loader
