@@ -9,6 +9,7 @@ Provides efficient training with:
 - Early stopping based on validation loss
 """
 
+import logging
 from typing import Dict, List, Optional
 
 import lightning as L
@@ -20,6 +21,9 @@ from .config import OptimizerConfig, WorldModelAgentConfig
 from .data_collection import ImageDataset, SequenceDataset
 from .models.fsq_vae import FSQVAE
 from .models.world_model import WorldModel
+from .utils import get_logger
+
+logger = get_logger("world_models")
 
 
 def create_optimizer(parameters, opt_config: OptimizerConfig):
@@ -138,7 +142,7 @@ class VAELightningModule(L.LightningModule):
         self.log("train/loss", loss_dict["total_loss"], prog_bar=True)
 
         # Reconstruction metrics (grouped for easy comparison)
-        self.log("train/recon_loss", loss_dict["recon_loss"], prog_bar=True)
+        self.log("train/recon_loss", loss_dict["recon_loss"], prog_bar=False)
         self.log("train/mse_loss", loss_dict["mse_loss"])
         if "perceptual_loss" in loss_dict:
             self.log(
@@ -175,7 +179,7 @@ class VAELightningModule(L.LightningModule):
         self.log("val/loss", loss_dict["total_loss"], prog_bar=True)
 
         # Reconstruction metrics (grouped for easy comparison)
-        self.log("val/recon_loss", loss_dict["recon_loss"], prog_bar=True)
+        self.log("val/recon_loss", loss_dict["recon_loss"], prog_bar=False)
         self.log("val/mse_loss", loss_dict["mse_loss"])
         if "perceptual_loss" in loss_dict:
             self.log("val/perceptual_loss", loss_dict["perceptual_loss"])
@@ -194,7 +198,7 @@ class VAELightningModule(L.LightningModule):
             self.log(
                 "val/codebook_perplexity",
                 loss_dict["codebook_perplexity"],
-                prog_bar=True,
+                prog_bar=False,
             )
             self.log("val/perplexity_ratio", loss_dict["perplexity_ratio"])
 
@@ -263,7 +267,7 @@ class WorldModelLightningModule(L.LightningModule):
         # Log metrics
         self.log("train/loss", loss_dict["total_loss"], prog_bar=True)
         self.log("train/token_loss", loss_dict["token_loss"])
-        self.log("train/token_accuracy", loss_dict["token_accuracy"], prog_bar=True)
+        self.log("train/token_accuracy", loss_dict["token_accuracy"], prog_bar=False)
         self.log("train/reward_loss", loss_dict["reward_loss"])
         self.log("train/done_loss", loss_dict["done_loss"])
 
@@ -295,7 +299,7 @@ class WorldModelLightningModule(L.LightningModule):
         # Log validation metrics
         self.log("val/loss", loss_dict["total_loss"], prog_bar=True)
         self.log("val/token_loss", loss_dict["token_loss"])
-        self.log("val/token_accuracy", loss_dict["token_accuracy"], prog_bar=True)
+        self.log("val/token_accuracy", loss_dict["token_accuracy"], prog_bar=False)
         self.log("val/reward_loss", loss_dict["reward_loss"])
         self.log("val/done_loss", loss_dict["done_loss"])
 
@@ -430,10 +434,10 @@ def create_train_val_dataloaders(
         # Validation: sequential sample from current chunk
         val_sampler = SequentialSampler(range(min(val_samples, chunk_size)))
 
-        print(f"Created chunked dataloaders:")
-        print(f"  Train: sampling from current chunk ({chunk_size:,} images)")
-        print(f"  Val: {min(val_samples, chunk_size):,} samples from current chunk")
-        print(
+        logger.debug(f"Created chunked dataloaders:")
+        logger.debug(f"  Train: sampling from current chunk ({chunk_size:,} images)")
+        logger.debug(f"  Val: {min(val_samples, chunk_size):,} samples from current chunk")
+        logger.debug(
             f"  Note: Chunk rotates every N epochs, dataset.__len__() updates automatically"
         )
     else:
@@ -468,11 +472,11 @@ def create_train_val_dataloaders(
             val_dataset = Subset(val_dataset, val_indices_subset)
         val_sampler = SequentialSampler(val_dataset)
 
-        print(f"Created dataloaders:")
-        print(
+        logger.debug(f"Created dataloaders:")
+        logger.debug(
             f"  Train: {len(train_dataset):,} samples, {train_samples_per_epoch} batches/epoch"
         )
-        print(f"  Val: {len(val_dataset):,} samples ({val_split*100:.1f}% of data)")
+        logger.debug(f"  Val: {len(val_dataset):,} samples ({val_split*100:.1f}% of data)")
 
     # Create dataloaders with worker sharding
     train_loader = DataLoader(
@@ -500,12 +504,6 @@ def create_train_val_dataloaders(
             worker_init_fn if num_workers > 0 else None
         ),  # Shard files across workers
     )
-
-    print(f"Created dataloaders:")
-    print(
-        f"  Train: {len(train_dataset):,} samples, {train_samples_per_epoch} batches/epoch"
-    )
-    print(f"  Val: {len(val_dataset):,} samples ({val_split*100:.1f}% of data)")
 
     return train_loader, val_loader
 
@@ -591,10 +589,10 @@ def create_sequence_train_val_dataloaders(
         ),  # Shard files across workers
     )
 
-    print(f"Created sequence dataloaders:")
-    print(
+    logger.debug(f"Created sequence dataloaders:")
+    logger.debug(
         f"  Train: {len(train_dataset):,} sequences, {train_samples_per_epoch} batches/epoch"
     )
-    print(f"  Val: {len(val_dataset):,} sequences ({val_split*100:.1f}% of data)")
+    logger.debug(f"  Val: {len(val_dataset):,} sequences ({val_split*100:.1f}% of data)")
 
     return train_loader, val_loader

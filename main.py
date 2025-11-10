@@ -3,6 +3,7 @@ Main training pipeline for World Model agent.
 """
 
 import argparse
+import logging
 import os
 import sys
 from datetime import datetime
@@ -26,6 +27,8 @@ from world_models import (
     WorldModelTrainer,
     create_sequence_train_val_dataloaders,
     create_train_val_dataloaders,
+    get_logger,
+    setup_logger,
 )
 
 
@@ -48,7 +51,7 @@ class TeeOutput:
         self.file.close()
 
 
-def setup_logging(log_file):
+def setup_output_logging(log_file):
     """Redirect stdout and stderr to both console and file."""
     if log_file is None:
         return None, None
@@ -72,8 +75,6 @@ def setup_logging(log_file):
 
     sys.stdout = stdout_tee
     sys.stderr = stderr_tee
-
-    print(f"Logging to file: {log_file}")
 
     return stdout_tee, stderr_tee
 
@@ -142,20 +143,25 @@ def main():
     )
     args = parser.parse_args()
 
+    # Initialize logger
+    logger = setup_logger("world_models", level=logging.INFO)
+
     # Load configuration
-    print(f"Loading config from: {args.config}")
+    logger.info(f"Loading config from: {args.config}")
     if args.config:
         config = WorldModelAgentConfig.from_yaml(args.config)
-        print(
+        logger.debug(
             f"Config loaded from YAML: max_episode_length={config.data.max_episode_length}, num_workers={config.data.num_workers}"
         )
     else:
         config = WorldModelAgentConfig()
-        print(f"Using default config")
+        logger.info("Using default config")
 
     # Set up logging to file (command line overrides config)
     log_file = args.log_file if args.log_file is not None else config.training.log_file
-    stdout_tee, stderr_tee = setup_logging(log_file)
+    if log_file:
+        logger.info(f"Logging to file: {log_file}")
+    stdout_tee, stderr_tee = setup_output_logging(log_file)
 
     # Set device
     if args.device is not None:
@@ -191,37 +197,39 @@ def main():
     os.makedirs(config.data.data_dir, exist_ok=True)
     os.makedirs(config.training.checkpoint_dir, exist_ok=True)
 
-    print(f"Starting World Model training pipeline...")
-    print(f"Device: {device}")
-    print(f"Stage: {args.stage}")
-    print(f"Max episode length: {config.data.max_episode_length}")
-    print(f"Num workers: {config.data.num_workers}")
+    logger.info("="*50)
+    logger.info("World Model Training Pipeline")
+    logger.info("="*50)
+    logger.info(f"Device: {device}")
+    logger.info(f"Stage: {args.stage}")
+    logger.info(f"Max episode length: {config.data.max_episode_length}")
+    logger.info(f"Num workers: {config.data.num_workers}")
 
     if args.stage in ["collect", "all"]:
-        print("\n" + "=" * 50)
-        print("STAGE 1: DATA COLLECTION")
-        print("=" * 50)
+        logger.info("\n" + "=" * 50)
+        logger.info("STAGE 1: DATA COLLECTION")
+        logger.info("=" * 50)
         collect_data(config, args.data_file, args.checkpoint_every)
 
     if args.stage in ["vae", "all"]:
-        print("\n" + "=" * 50)
-        print("STAGE 2: VAE TRAINING")
-        print("=" * 50)
+        logger.info("\n" + "=" * 50)
+        logger.info("STAGE 2: VAE TRAINING")
+        logger.info("=" * 50)
         train_vae(config, args.data_file, args.resume)
 
     if args.stage in ["world_model", "all"]:
-        print("\n" + "=" * 50)
-        print("STAGE 3: WORLD MODEL TRAINING")
-        print("=" * 50)
+        logger.info("\n" + "=" * 50)
+        logger.info("STAGE 3: WORLD MODEL TRAINING")
+        logger.info("=" * 50)
         train_world_model(config, args.data_file, args.resume)
 
     if args.stage in ["controller", "all"]:
-        print("\n" + "=" * 50)
-        print("STAGE 4: CONTROLLER TRAINING")
-        print("=" * 50)
+        logger.info("\n" + "=" * 50)
+        logger.info("STAGE 4: CONTROLLER TRAINING")
+        logger.info("=" * 50)
         train_controller(config, args.resume)
 
-    print("\nTraining pipeline completed!")
+    logger.info("Training pipeline completed!")
 
     # Clean up logging
     if stdout_tee is not None:
@@ -235,15 +243,16 @@ def collect_data(
     config: WorldModelAgentConfig, data_file: str, checkpoint_every: int = 100
 ):
     """Collect training data with checkpointing."""
+    logger = get_logger("world_models")
     collector = DataCollector(config.data)
 
-    print(f"Collecting {config.data.num_rollouts} episodes with checkpointing...")
+    logger.info(f"Collecting {config.data.num_rollouts} episodes with checkpointing...")
     collector.collect_random_episodes(
         config.data.num_rollouts, data_file=data_file, checkpoint_every=checkpoint_every
     )
 
     collector.close()
-    print("Data collection completed!")
+    logger.info("Data collection completed!")
 
 
 def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = False):
@@ -253,6 +262,8 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     from lightning.pytorch.loggers import TensorBoardLogger
 
     from src.world_models.lightning_training import ChunkRotationCallback
+
+    logger = get_logger("world_models")
 
     # Create VAE dataset with sequential chunk loading
     collector = DataCollector(config.data)
@@ -320,7 +331,7 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     if isinstance(dataset, VAEDataset):
         # Rotate through chunks every epoch for VAEDataset
         callbacks.append(ChunkRotationCallback(epochs_per_phase=1))
-        print(f"  - Chunk rotation enabled: rotating every epoch")
+        logger.debug("Chunk rotation enabled: rotating every epoch")
 
     # Setup TensorBoard logger
     tb_logger = TensorBoardLogger(
@@ -342,33 +353,32 @@ def train_vae(config: WorldModelAgentConfig, data_file: str, resume: bool = Fals
     )
 
     # Train
-    print(
+    logger.info(
         f"Training VAE with Lightning (max {config.training.train_vae_epochs} epochs)..."
     )
-    print(f"  - {config.training.steps_per_epoch} batches per epoch")
+    logger.info(f"Batches per epoch: {config.training.steps_per_epoch}")
     if isinstance(dataset, VAEDataset):
-        print(f"  - Subsample rate: 1/{config.training.vae_subsample_rate}")
+        logger.info(f"Subsample rate: 1/{config.training.vae_subsample_rate}")
     else:
-        print(f"  - Subsample rate: 1/{config.training.subsample_rate}")
-    print(f"  - Validation split: {config.training.val_split*100:.1f}%")
-    print(
-        f"  - Early stopping patience: {config.training.early_stopping_patience} epochs"
+        logger.info(f"Subsample rate: 1/{config.training.subsample_rate}")
+    logger.info(f"Validation split: {config.training.val_split*100:.1f}%")
+    logger.info(
+        f"Early stopping patience: {config.training.early_stopping_patience} epochs"
     )
-    print(f"  - Checkpointing best models based on validation loss")
 
     ckpt_path = None
     if resume:
         last_ckpt = os.path.join(config.training.checkpoint_dir, "vae", "last.ckpt")
         if os.path.exists(last_ckpt):
             ckpt_path = last_ckpt
-            print(f"Resuming from {ckpt_path}")
+            logger.info(f"Resuming from {ckpt_path}")
 
     trainer.fit(lightning_module, train_loader, val_loader, ckpt_path=ckpt_path)
 
-    print("\nVAE training completed!")
-    print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
-    print(f"\nTensorBoard logs saved to: {tb_logger.log_dir}")
-    print(
+    logger.info("VAE training completed!")
+    logger.info(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+    logger.info(f"TensorBoard logs saved to: {tb_logger.log_dir}")
+    logger.info(
         "To view logs, run: tensorboard --logdir={}/vae_logs".format(
             config.training.checkpoint_dir
         )
@@ -381,13 +391,11 @@ def train_world_model(
     config: WorldModelAgentConfig, data_file: str, resume: bool = False
 ):
     """Train the world model using Lightning."""
-    print("\n" + "=" * 50)
-    print("STAGE 2: WORLD MODEL TRAINING")
-    print("=" * 50)
-
     import lightning as L
     from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
     from lightning.pytorch.loggers import TensorBoardLogger
+
+    logger = get_logger("world_models")
 
     # Create WorldModelDataset with sequential chunk loading
     collector = DataCollector(config.data)
@@ -443,30 +451,30 @@ def train_world_model(
     )
 
     if os.path.exists(vae_lightning_checkpoint_v1):
-        print(
+        logger.info(
             f"Loading VAE from Lightning checkpoint (v1): {vae_lightning_checkpoint_v1}"
         )
         vae_module = VAELightningModule.load_from_checkpoint(
             vae_lightning_checkpoint_v1, model=vae, config=config
         )
         vae = vae_module.model
-        print("Loaded trained VAE from Lightning checkpoint (v1)")
+        logger.info("Loaded trained VAE from Lightning checkpoint (v1)")
     elif os.path.exists(vae_lightning_checkpoint):
-        print(f"Loading VAE from Lightning checkpoint: {vae_lightning_checkpoint}")
+        logger.info(f"Loading VAE from Lightning checkpoint: {vae_lightning_checkpoint}")
         vae_module = VAELightningModule.load_from_checkpoint(
             vae_lightning_checkpoint, model=vae, config=config
         )
         vae = vae_module.model
-        print("Loaded trained VAE from Lightning checkpoint")
+        logger.info("Loaded trained VAE from Lightning checkpoint")
     elif os.path.exists(vae_legacy_checkpoint):
-        print(f"Loading VAE from legacy checkpoint: {vae_legacy_checkpoint}")
+        logger.info(f"Loading VAE from legacy checkpoint: {vae_legacy_checkpoint}")
         from src.world_models import VAETrainer
 
         vae_trainer = VAETrainer(vae, config)
         vae_trainer.load_checkpoint(vae_legacy_checkpoint)
-        print("Loaded trained VAE from legacy checkpoint")
+        logger.info("Loaded trained VAE from legacy checkpoint")
     else:
-        print("Warning: No trained VAE found. Training world model with random VAE.")
+        logger.warning("No trained VAE found. Training world model with random VAE.")
 
     # Create world model and Lightning module
     world_model = WorldModel(config.world_model)
@@ -498,7 +506,7 @@ def train_world_model(
 
         # Rotate through chunks every epoch for WorldModelDataset
         callbacks.append(ChunkRotationCallback(epochs_per_phase=1))
-        print(f"  - Chunk rotation enabled: rotating every epoch")
+        logger.debug("Chunk rotation enabled: rotating every epoch")
 
     # Setup TensorBoard logger
     tb_logger = TensorBoardLogger(
@@ -528,32 +536,31 @@ def train_world_model(
         )
         if os.path.exists(last_ckpt):
             ckpt_path = last_ckpt
-            print(f"Resuming world model training from {ckpt_path}")
+            logger.info(f"Resuming world model training from {ckpt_path}")
 
     # Train
-    print(
+    logger.info(
         "Training World Model with Lightning (max {} epochs)...".format(
             config.training.train_world_model_epochs
         )
     )
-    print(f"  - {config.training.world_model_steps_per_epoch} batches per epoch")
+    logger.info(f"Batches per epoch: {config.training.world_model_steps_per_epoch}")
     if isinstance(dataset, WorldModelDataset):
-        print(f"  - Sequence length: {config.training.world_model_sequence_length}")
-        print(f"  - Subsample rate: 1/{config.training.world_model_subsample_rate}")
+        logger.info(f"Sequence length: {config.training.world_model_sequence_length}")
+        logger.info(f"Subsample rate: 1/{config.training.world_model_subsample_rate}")
     else:
-        print(f"  - Sequence length: {config.world_model.sequence_length}")
-    print(f"  - Validation split: {config.training.val_split*100:.1f}%")
-    print(
-        f"  - Early stopping patience: {config.training.early_stopping_patience} epochs"
+        logger.info(f"Sequence length: {config.world_model.sequence_length}")
+    logger.info(f"Validation split: {config.training.val_split*100:.1f}%")
+    logger.info(
+        f"Early stopping patience: {config.training.early_stopping_patience} epochs"
     )
-    print(f"  - Checkpointing best models based on validation loss")
 
     trainer.fit(lightning_module, train_loader, val_loader, ckpt_path=ckpt_path)
 
-    print("\nWorld model training completed!")
-    print(f"Best checkpoint: {checkpoint_callback.best_model_path}")
-    print(f"\nTensorBoard logs saved to: {tb_logger.log_dir}")
-    print(
+    logger.info("World model training completed!")
+    logger.info(f"Best checkpoint: {checkpoint_callback.best_model_path}")
+    logger.info(f"TensorBoard logs saved to: {tb_logger.log_dir}")
+    logger.info(
         "To view logs, run: tensorboard --logdir={}/world_model_logs".format(
             config.training.checkpoint_dir
         )
@@ -564,6 +571,7 @@ def train_world_model(
 
 def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     """Train the controller."""
+    logger = get_logger("world_models")
     device = config.training.device
     # Load trained models
     vae = FSQVAE(
@@ -579,16 +587,16 @@ def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     if os.path.exists(vae_checkpoint_path):
         vae_trainer = VAETrainer(vae, config)
         vae_trainer.load_checkpoint(vae_checkpoint_path)
-        print("Loaded trained VAE")
+        logger.info("Loaded trained VAE")
     else:
-        print("Warning: No trained VAE found.")
+        logger.warning("No trained VAE found.")
 
     if os.path.exists(wm_checkpoint_path):
         wm_trainer = WorldModelTrainer(world_model, vae, config)
         wm_trainer.load_checkpoint(wm_checkpoint_path)
-        print("Loaded trained world model")
+        logger.info("Loaded trained world model")
     else:
-        print("Warning: No trained world model found.")
+        logger.warning("No trained world model found.")
 
     # Create controller trainer
     trainer = ControllerTrainer(vae, world_model, config)
@@ -598,11 +606,11 @@ def train_controller(config: WorldModelAgentConfig, resume: bool = False):
         config.training.checkpoint_dir, "controller_latest.pth"
     )
     if resume and os.path.exists(controller_checkpoint_path):
-        print(f"Resuming controller training from {controller_checkpoint_path}")
+        logger.info(f"Resuming controller training from {controller_checkpoint_path}")
         # TODO: Implement controller resume logic
 
     # Train
-    print(
+    logger.info(
         f"Training controller for {config.training.train_controller_epochs} generations..."
     )
     history = trainer.train(config.training.train_controller_epochs)
@@ -615,10 +623,10 @@ def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     )
 
     # Save population checkpoint
-    print(f"Saving controller checkpoint to {controller_checkpoint_path}")
+    logger.info(f"Saving controller checkpoint to {controller_checkpoint_path}")
     trainer.save_checkpoint(controller_checkpoint_path)
 
-    print("Controller training completed!")
+    logger.info("Controller training completed!")
     return best_controller
 
 
@@ -628,6 +636,7 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
 
     from world_models import EvolutionaryController
 
+    logger = get_logger("world_models")
     device = config.training.device
     # Load trained models
     vae = FSQVAE(
@@ -644,16 +653,16 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
     if os.path.exists(vae_checkpoint_path):
         vae_trainer = VAETrainer(vae, config)
         vae_trainer.load_checkpoint(vae_checkpoint_path)
-        print("Loaded trained VAE")
+        logger.info("Loaded trained VAE")
     else:
-        print("No trained VAE found!")
+        logger.error("No trained VAE found!")
         return
 
     if os.path.exists(controller_checkpoint_path):
         controller.load_state_dict(torch.load(controller_checkpoint_path))
-        print("Loaded trained controller")
+        logger.info("Loaded trained controller")
     else:
-        print("No trained controller found!")
+        logger.error("No trained controller found!")
         return
 
     # Create environment
@@ -705,14 +714,14 @@ def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
                 break
 
         total_returns.append(episode_return)
-        print(f"Episode {episode+1}: Return = {episode_return:.2f}")
+        logger.info(f"Episode {episode+1}: Return = {episode_return:.2f}")
 
     env.close()
 
     mean_return = np.mean(total_returns)
     std_return = np.std(total_returns)
-    print(f"\nEvaluation Results ({num_episodes} episodes):")
-    print(f"Mean Return: {mean_return:.2f} ± {std_return:.2f}")
+    logger.info(f"Evaluation Results ({num_episodes} episodes):")
+    logger.info(f"Mean Return: {mean_return:.2f} ± {std_return:.2f}")
 
     return mean_return
 
