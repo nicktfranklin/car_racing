@@ -371,10 +371,9 @@ def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     )
     history = trainer.train(config.training.train_controller_epochs)
 
-    # Save best controller
-    best_controller = trainer.get_best_controller()
+    # Save trained controller
     torch.save(
-        best_controller.state_dict(),
+        trainer.controller.state_dict(),
         os.path.join(config.training.checkpoint_dir, "best_controller.pth"),
     )
 
@@ -383,7 +382,7 @@ def train_controller(config: WorldModelAgentConfig, resume: bool = False):
     trainer.save_checkpoint(controller_checkpoint_path)
 
     logger.info("Controller training completed!")
-    return best_controller
+    return trainer.controller
 
 
 def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
