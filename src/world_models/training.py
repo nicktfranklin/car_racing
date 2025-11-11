@@ -339,9 +339,6 @@ class ControllerTrainer:
 
         # Move models to device and set to eval mode
         self.vae.to(self.device).eval()
-        # Keep world model on CPU to avoid MPS tensor corruption bugs during rollouts
-        self.world_model.cpu().eval()
-        self.world_model_device = torch.device("cpu")
 
         # Create controller
         self.controller = EvolutionaryController(config.controller).to(self.device)
@@ -438,7 +435,9 @@ class ControllerTrainer:
 
             # Track metrics
             history["loss"].append(loss.item())
-            history["mean_reward"].append(rollout_data["rewards"].sum(dim=1).mean().item())
+            history["mean_reward"].append(
+                rollout_data["rewards"].sum(dim=1).mean().item()
+            )
 
             print(
                 f"Update {update+1}/{num_updates}: "
@@ -496,7 +495,7 @@ class ControllerTrainer:
                     actions_raw[rollout_idx, step] = action_raw_sample.squeeze(0)
 
                     # Compute log prob
-                    var = std ** 2
+                    var = std**2
                     log_prob = (
                         -((action_raw_sample - mean) ** 2) / (2 * var)
                         - self.controller.log_std
@@ -535,7 +534,8 @@ class ControllerTrainer:
                     # Tokens are discrete [0, level-1], convert to continuous [-1, 1]
                     levels_tensor = torch.tensor(
                         self.config.fsq_vae.fsq_levels,
-                        dtype=torch.float32, device=self.device
+                        dtype=torch.float32,
+                        device=self.device,
                     )
                     # Vectorized conversion: (token * 2 / (level - 1)) - 1
                     z_q = (next_state_tokens.float() * 2.0 / (levels_tensor - 1)) - 1.0
