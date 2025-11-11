@@ -339,7 +339,9 @@ class ControllerTrainer:
 
         # Move models to device and set to eval mode
         self.vae.to(self.device).eval()
-        self.world_model.to(self.device).eval()
+        # Keep world model on CPU to avoid MPS tensor corruption bugs during rollouts
+        self.world_model.cpu().eval()
+        self.world_model_device = torch.device("cpu")
 
         # Create controller
         self.controller = EvolutionaryController(config.controller).to(self.device)
@@ -513,13 +515,9 @@ class ControllerTrainer:
                     state_tokens_batch = state_tokens.unsqueeze(1)  # (1, 1, fsq_dim)
                     action_batch = action.unsqueeze(1)  # (1, 1, action_dim)
 
-                    # Force action_batch to CPU to avoid MPS tensor corruption
+                    # Move to CPU for world model (which stays on CPU to avoid MPS bugs)
                     action_batch_cpu = action_batch.cpu()
                     state_tokens_batch_cpu = state_tokens_batch.cpu()
-
-                    # Move world model to CPU temporarily
-                    world_model_device = next(self.world_model.parameters()).device
-                    self.world_model.cpu()
 
                     next_state_tokens, reward_pred, done_pred, _ = (
                         self.world_model.sample_next_state(
@@ -527,8 +525,7 @@ class ControllerTrainer:
                         )
                     )
 
-                    # Move world model back to original device
-                    self.world_model.to(world_model_device)
+                    # Move results back to main device
                     next_state_tokens = next_state_tokens.to(self.device)
 
                     # Store reward
