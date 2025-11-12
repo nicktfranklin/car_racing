@@ -1437,7 +1437,9 @@ class WorldModelDataset(torch.utils.data.Dataset):
             # This avoids slow HDF5 fancy indexing that can cause blocking I/O
             obs_dataset = ep_group["observations"]
             for j, frame_idx in enumerate(actual_frame_indices):
-                observations[seq_idx, j] = obs_dataset[frame_idx].astype(np.float32) / 255.0
+                observations[seq_idx, j] = (
+                    obs_dataset[frame_idx].astype(np.float32) / 255.0
+                )
 
             # Load other data sequentially
             actions_dataset = ep_group["actions"]

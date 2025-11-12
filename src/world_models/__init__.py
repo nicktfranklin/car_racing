@@ -24,7 +24,7 @@ from .lightning_training import (
     create_train_val_dataloaders,
 )
 from .models import FSQVAE, Controller, EvolutionaryController, WorldModel
-from .training import ControllerTrainer, VAETrainer, WorldModelTrainer
+from .training.controller_trainer import ControllerTrainer
 from .utils import get_logger, setup_logger, setup_output_logging
 
 __all__ = [
@@ -43,8 +43,6 @@ __all__ = [
     "SequenceDataset",
     "VAEDataset",
     "WorldModelDataset",
-    "VAETrainer",
-    "WorldModelTrainer",
     "ControllerTrainer",
     "VAELightningModule",
     "WorldModelLightningModule",

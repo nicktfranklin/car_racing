@@ -12,7 +12,6 @@ from ..config import WorldModelAgentConfig
 from ..lightning_training import VAELightningModule, WorldModelLightningModule
 from ..models.fsq_vae import FSQVAE
 from ..models.world_model import WorldModel
-from ..training import VAETrainer, WorldModelTrainer
 from ..utils import get_logger
 
 logger = get_logger("world_models")
@@ -89,21 +88,13 @@ class CheckpointManager:
             )
             return vae
 
-        # Load checkpoint
-        if checkpoint_path.endswith(".ckpt"):
-            # Lightning checkpoint
-            logger.info(f"Loading VAE from Lightning checkpoint: {checkpoint_path}")
-            vae_module = VAELightningModule.load_from_checkpoint(
-                checkpoint_path, model=vae, config=self.config, strict=False
-            )
-            vae = vae_module.model
-            logger.info("Loaded trained VAE from Lightning checkpoint")
-        else:
-            # Legacy checkpoint
-            logger.info(f"Loading VAE from legacy checkpoint: {checkpoint_path}")
-            vae_trainer = VAETrainer(vae, self.config)
-            vae_trainer.load_checkpoint(checkpoint_path)
-            logger.info("Loaded trained VAE from legacy checkpoint")
+        # Load Lightning checkpoint
+        logger.info(f"Loading VAE from Lightning checkpoint: {checkpoint_path}")
+        vae_module = VAELightningModule.load_from_checkpoint(
+            checkpoint_path, model=vae, config=self.config, strict=False
+        )
+        vae = vae_module.model
+        logger.info("Loaded trained VAE from Lightning checkpoint")
 
         return vae
 
@@ -126,30 +117,15 @@ class CheckpointManager:
             )
             return world_model
 
-        # Load checkpoint
-        if checkpoint_path.endswith(".ckpt"):
-            # Lightning checkpoint
-            logger.info(
-                f"Loading World Model from Lightning checkpoint: {checkpoint_path}"
-            )
-            # Need to load VAE first for WorldModelLightningModule
-            vae = self.load_vae(use_perceptual_loss=False)
+        # Load Lightning checkpoint
+        logger.info(f"Loading World Model from Lightning checkpoint: {checkpoint_path}")
+        # Need to load VAE first for WorldModelLightningModule
+        vae = self.load_vae(use_perceptual_loss=False)
 
-            wm_module = WorldModelLightningModule.load_from_checkpoint(
-                checkpoint_path, world_model=world_model, vae=vae, config=self.config
-            )
-            world_model = wm_module.world_model
-            logger.info("Loaded trained World Model from Lightning checkpoint")
-        else:
-            # Legacy checkpoint
-            logger.info(
-                f"Loading World Model from legacy checkpoint: {checkpoint_path}"
-            )
-            # Need VAE for legacy trainer
-            vae = self.load_vae(use_perceptual_loss=False)
-
-            wm_trainer = WorldModelTrainer(world_model, vae, self.config)
-            wm_trainer.load_checkpoint(checkpoint_path)
-            logger.info("Loaded trained World Model from legacy checkpoint")
+        wm_module = WorldModelLightningModule.load_from_checkpoint(
+            checkpoint_path, world_model=world_model, vae=vae, config=self.config
+        )
+        world_model = wm_module.world_model
+        logger.info("Loaded trained World Model from Lightning checkpoint")
 
         return world_model

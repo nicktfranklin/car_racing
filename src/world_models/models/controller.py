@@ -198,7 +198,9 @@ class EvolutionaryController(nn.Module):
             for param in self.parameters():
                 param += torch.randn_like(param) * mutation_strength
 
-    def get_action_with_logprob(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def get_action_with_logprob(
+        self, state: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample action from Gaussian policy and return log probability.
         Used for PPO training.
@@ -224,8 +226,12 @@ class EvolutionaryController(nn.Module):
         action_raw = mean + std * torch.randn_like(mean)
 
         # Compute log probability
-        var = std ** 2
-        log_prob = -((action_raw - mean) ** 2) / (2 * var) - self.log_std - 0.5 * torch.log(2 * torch.tensor(torch.pi))
+        var = std**2
+        log_prob = (
+            -((action_raw - mean) ** 2) / (2 * var)
+            - self.log_std
+            - 0.5 * torch.log(2 * torch.tensor(torch.pi))
+        )
         log_prob = log_prob.sum(dim=-1)  # Sum over action dimensions
 
         # Apply constraints
@@ -237,7 +243,9 @@ class EvolutionaryController(nn.Module):
 
         return action, log_prob
 
-    def evaluate_log_prob(self, state: torch.Tensor, action_raw: torch.Tensor) -> torch.Tensor:
+    def evaluate_log_prob(
+        self, state: torch.Tensor, action_raw: torch.Tensor
+    ) -> torch.Tensor:
         """
         Evaluate log probability of given actions.
         Used for PPO loss computation.
@@ -251,8 +259,12 @@ class EvolutionaryController(nn.Module):
         """
         mean = self.network(state)
         std = torch.exp(self.log_std).expand_as(mean)
-        var = std ** 2
-        log_prob = -((action_raw - mean) ** 2) / (2 * var) - self.log_std - 0.5 * torch.log(2 * torch.tensor(torch.pi))
+        var = std**2
+        log_prob = (
+            -((action_raw - mean) ** 2) / (2 * var)
+            - self.log_std
+            - 0.5 * torch.log(2 * torch.tensor(torch.pi))
+        )
         return log_prob.sum(dim=-1)
 
     def _apply_constraints(self, action_raw: torch.Tensor) -> torch.Tensor:
@@ -271,10 +283,12 @@ class EvolutionaryController(nn.Module):
             # Split and apply constraints separately to avoid MPS indexing bugs
             # Use slicing on the LAST dimension (action dim) regardless of 2D or 3D input
             action_raw = action_raw.contiguous()
-            steering = torch.tanh(action_raw[..., 0:1])     # Steering: -1 to 1
-            gas = torch.sigmoid(action_raw[..., 1:2])       # Gas: 0 to 1
-            brake = torch.sigmoid(action_raw[..., 2:3])     # Brake: 0 to 1
-            action = torch.cat([steering, gas, brake], dim=-1)  # Concatenate along last dim
+            steering = torch.tanh(action_raw[..., 0:1])  # Steering: -1 to 1
+            gas = torch.sigmoid(action_raw[..., 1:2])  # Gas: 0 to 1
+            brake = torch.sigmoid(action_raw[..., 2:3])  # Brake: 0 to 1
+            action = torch.cat(
+                [steering, gas, brake], dim=-1
+            )  # Concatenate along last dim
         else:
             action = torch.tanh(action_raw)
 

@@ -7,9 +7,9 @@ import os
 import torch
 
 from ..config import WorldModelAgentConfig
-from ..training import ControllerTrainer
 from ..utils import get_logger
 from .checkpoint_manager import CheckpointManager
+from .controller_trainer import ControllerTrainer
 
 
 def train_controller(config: WorldModelAgentConfig, resume: bool = False):
