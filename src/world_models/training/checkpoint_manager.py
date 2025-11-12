@@ -9,7 +9,7 @@ import os
 from typing import Optional
 
 from ..config import WorldModelAgentConfig
-from ..lightning_training import VAELightningModule, WorldModelLightningModule
+from .lightning import VAELightningModule, WorldModelLightningModule
 from ..models.fsq_vae import FSQVAE
 from ..models.world_model import WorldModel
 from ..utils import get_logger

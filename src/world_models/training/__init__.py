@@ -7,15 +7,16 @@ This module provides a clean interface for training functions.
 
 Structure:
 ----------
-- Modular training functions in separate files:
-  * data_collection.py - Data collection
-  * train_vae.py - VAE training with Lightning
-  * train_world_model.py - World Model training with Lightning
-  * train_controller.py - Controller training with PPO
-  * evaluation.py - Agent evaluation
-
-- ControllerTrainer is imported from the parent training.py module
-  (VAE and World Model use Lightning modules instead of trainer classes)
+Modular training organized by component:
+  * lightning/ - Lightning modules, callbacks, and dataloaders
+  * datasets/ - PyTorch Dataset implementations (image, sequence)
+  * data_collection/ - Environment interaction and data collection
+  * controller/ - Controller training with PPO
+  * train_vae.py - VAE training orchestration
+  * train_world_model.py - World Model training orchestration
+  * train_controller.py - Controller training orchestration
+  * checkpoint_manager.py - Model checkpoint loading/saving
+  * lightning_setup.py - Lightning infrastructure setup
 
 Import Policy:
 --------------
@@ -25,9 +26,8 @@ and makes dependencies explicit.
 """
 
 from .checkpoint_manager import CheckpointManager
-from .controller_trainer import ControllerTrainer
+from .controller import ControllerTrainer
 from .data_collection import collect_data
-from .evaluation import evaluate_agent
 from .lightning_setup import (
     create_dataloaders,
     create_dataset,
@@ -53,5 +53,4 @@ __all__ = [
     "train_vae",
     "train_world_model",
     "train_controller",
-    "evaluate_agent",
 ]

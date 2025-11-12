@@ -1,13 +1,12 @@
 """
-Data collection for World Model training.
+Data collector for World Model training.
 """
 
 import gc
 import multiprocessing as mp
 import os
-import time
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
-from typing import List, Optional, Tuple
+from typing import List
 
 import gymnasium as gym
 import h5py
@@ -15,108 +14,11 @@ import numpy as np
 from skimage.transform import resize
 from tqdm import tqdm
 
-from ..config import DataConfig, WorldModelAgentConfig
-from ..utils import get_logger
-
-
-class Episode:
-    """Container for episode data."""
-
-    def __init__(self):
-        self.observations = []
-        self.actions = []
-        self.rewards = []
-        self.dones = []
-
-    def add_step(self, obs: np.ndarray, action: np.ndarray, reward: float, done: bool):
-        """Add a step to the episode."""
-        self.observations.append(obs)
-        self.actions.append(action)
-        self.rewards.append(reward)
-        self.dones.append(done)
-
-    def to_arrays(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """Convert lists to numpy arrays."""
-        return (
-            np.array(self.observations),
-            np.array(self.actions),
-            np.array(self.rewards),
-            np.array(self.dones),
-        )
-
-    def __len__(self) -> int:
-        return len(self.observations)
-
-
-class RandomAgent:
-    """Random agent for data collection."""
-
-    def __init__(self, action_space):
-        self.action_space = action_space
-
-    def get_action(self, obs: np.ndarray) -> np.ndarray:
-        """Get random action."""
-        return self.action_space.sample()
-
-
-def collect_episodes_worker(
-    args: Tuple[str, Optional[str], int, int, int],
-) -> List[Episode]:
-    """Worker function for parallel episode collection."""
-    import os
-    import warnings
-
-    # Suppress all warnings in worker processes
-    warnings.filterwarnings("ignore")
-    os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
-
-    env_name, render_mode, num_episodes, max_episode_length, worker_id = args
-
-    # Create environment for this worker (None render mode for fastest collection)
-    if render_mode is None:
-        env = gym.make(env_name, max_episode_steps=max_episode_length)
-    else:
-        env = gym.make(
-            env_name, render_mode=render_mode, max_episode_steps=max_episode_length
-        )
-    agent = RandomAgent(env.action_space)
-    episodes = []
-
-    # Set different random seed for each worker
-    np.random.seed(worker_id * 1000 + int(time.time()) % 1000)
-
-    for i in range(num_episodes):
-        episode = Episode()
-        obs, _ = env.reset()
-
-        # Preprocess observation - keep as uint8 for efficient storage
-        obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(
-            np.uint8
-        )
-
-        for step in range(max_episode_length):
-            action = agent.get_action(obs)
-            next_obs, reward, terminated, truncated, _ = env.step(action)
-
-            # Preprocess next observation - keep as uint8
-            next_obs = resize(
-                next_obs, (64, 64), anti_aliasing=True, preserve_range=True
-            ).astype(np.uint8)
-
-            episode.add_step(obs, action, reward, terminated or truncated)
-            obs = next_obs
-
-            if terminated or truncated:
-                break
-
-        episodes.append(episode)
-
-        # Cleanup after each episode to reduce memory pressure
-        if (i + 1) % 10 == 0:
-            gc.collect()
-
-    env.close()
-    return episodes
+from ...config import DataConfig, WorldModelAgentConfig
+from ...utils import get_logger
+from .agent import RandomAgent
+from .episode import Episode
+from .workers import collect_episodes_worker
 
 
 class DataCollector:
@@ -298,7 +200,6 @@ class DataCollector:
         # OPTIMIZATION: Batch multiple episodes per worker to reduce process spawning overhead
         episodes_per_batch = getattr(self.config, "episodes_per_batch", 10)
 
-        start_time = time.time()
         all_episodes = []
 
         # OPTIMIZATION: Increase max_in_flight for better throughput
@@ -372,7 +273,6 @@ class DataCollector:
         # OPTIMIZATION: Batch multiple episodes per worker to reduce process spawning overhead
         episodes_per_batch = getattr(self.config, "episodes_per_batch", 10)
 
-        start_time = time.time()
         all_episodes = []
 
         # Determine progress bar total: show remaining work, not total

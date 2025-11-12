@@ -11,11 +11,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from ..config import WorldModelAgentConfig
-from ..models.controller import EvolutionaryController
-from ..models.fsq_vae import FSQVAE
-from ..models.world_model import WorldModel
-from ..utils import get_logger, print_model_info
+from ...config import WorldModelAgentConfig
+from ...models.controller import EvolutionaryController
+from ...models.fsq_vae import FSQVAE
+from ...models.world_model import WorldModel
+from ...utils import get_logger, print_model_info
 
 logger = get_logger("world_models")
 

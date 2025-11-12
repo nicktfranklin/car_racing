@@ -13,7 +13,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from ..config import WorldModelAgentConfig
-from ..lightning_training import (
+from .lightning import (
     ChunkRotationCallback,
     create_sequence_train_val_dataloaders,
     create_train_val_dataloaders,
