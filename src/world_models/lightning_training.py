@@ -9,130 +9,17 @@ Provides efficient training with:
 - Early stopping based on validation loss
 """
 
-import logging
-from typing import Dict, List, Optional
-
 import lightning as L
 import torch
-import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, Subset
 
-from .config import OptimizerConfig, WorldModelAgentConfig
-from .data_collection import ImageDataset, SequenceDataset
+from .config import WorldModelAgentConfig
 from .models.fsq_vae import FSQVAE
 from .models.world_model import WorldModel
-from .utils import get_logger
+from .utils import get_logger, print_model_info
+from .utils.training_utils import create_optimizer, create_scheduler
 
 logger = get_logger("world_models")
-
-
-def print_model_info(model: nn.Module, model_name: str):
-    """Print model architecture and parameter count."""
-    print(f"\n{'=' * 60}")
-    print(f"{model_name} Architecture")
-    print(f"{'=' * 60}")
-
-    # Count parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    print(f"Total parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
-    print(f"Non-trainable parameters: {total_params - trainable_params:,}")
-    print(f"Model size (MB): {total_params * 4 / 1024 / 1024:.2f}")
-
-    # Print model structure
-    print(f"\nModel structure:")
-    print(model)
-    print(f"{'=' * 60}\n")
-
-
-def create_optimizer(parameters, opt_config: OptimizerConfig):
-    """Create optimizer from config."""
-    if opt_config.optimizer.lower() == "adam":
-        optimizer = optim.Adam(
-            parameters,
-            lr=opt_config.learning_rate,
-            betas=(opt_config.beta1, opt_config.beta2),
-            eps=opt_config.epsilon,
-            weight_decay=opt_config.weight_decay,
-            amsgrad=opt_config.amsgrad,
-        )
-    elif opt_config.optimizer.lower() == "adamw":
-        optimizer = optim.AdamW(
-            parameters,
-            lr=opt_config.learning_rate,
-            betas=(opt_config.beta1, opt_config.beta2),
-            eps=opt_config.epsilon,
-            weight_decay=opt_config.weight_decay,
-            amsgrad=opt_config.amsgrad,
-        )
-    elif opt_config.optimizer.lower() == "sgd":
-        optimizer = optim.SGD(
-            parameters,
-            lr=opt_config.learning_rate,
-            momentum=opt_config.momentum,
-            weight_decay=opt_config.weight_decay,
-            nesterov=opt_config.nesterov,
-        )
-    else:
-        raise ValueError(f"Unknown optimizer: {opt_config.optimizer}")
-
-    return optimizer
-
-
-def create_scheduler(optimizer, opt_config: OptimizerConfig, num_epochs: int):
-    """Create learning rate scheduler from config."""
-    if not opt_config.use_scheduler:
-        return None
-
-    scheduler_type = opt_config.scheduler.lower()
-
-    if scheduler_type == "cosine":
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=num_epochs - opt_config.warmup_epochs,
-            eta_min=opt_config.min_lr,
-        )
-    elif scheduler_type == "step":
-        scheduler = optim.lr_scheduler.StepLR(
-            optimizer, step_size=opt_config.step_size, gamma=opt_config.gamma
-        )
-    elif scheduler_type == "exponential":
-        scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=opt_config.gamma)
-    elif scheduler_type == "reduce_on_plateau":
-        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            mode="min",
-            factor=opt_config.factor,
-            patience=opt_config.patience,
-            min_lr=opt_config.min_lr,
-        )
-        return {
-            "scheduler": scheduler,
-            "monitor": "val/loss",
-            "interval": "epoch",
-            "frequency": 1,
-        }
-    else:
-        raise ValueError(f"Unknown scheduler: {scheduler_type}")
-
-    # Add warmup if needed
-    if opt_config.warmup_epochs > 0:
-        warmup_scheduler = optim.lr_scheduler.LinearLR(
-            optimizer,
-            start_factor=0.1,
-            end_factor=1.0,
-            total_iters=opt_config.warmup_epochs,
-        )
-        scheduler = optim.lr_scheduler.SequentialLR(
-            optimizer,
-            schedulers=[warmup_scheduler, scheduler],
-            milestones=[opt_config.warmup_epochs],
-        )
-
-    return {"scheduler": scheduler, "interval": "epoch", "frequency": 1}
 
 
 class VAELightningModule(L.LightningModule):

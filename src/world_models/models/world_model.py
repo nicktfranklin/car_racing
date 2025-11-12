@@ -20,7 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import GPT2Config, GPT2LMHeadModel
 
-from world_models.config import WorldModelConfig
+from ..config import WorldModelConfig
 
 
 class WorldModel(nn.Module):

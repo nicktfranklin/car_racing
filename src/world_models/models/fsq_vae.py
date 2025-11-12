@@ -561,25 +561,3 @@ class FSQVAE(nn.Module):
         return total_loss, loss_dict
 
 
-if __name__ == "__main__":
-    # Test the FSQ-VAE implementation
-    config = FSQVAEConfig()
-    model = FSQVAE(config)
-
-    # Test forward pass
-    batch_size = 4
-    x = torch.randn(
-        batch_size, config.input_channels, config.input_height, config.input_width
-    )
-
-    with torch.no_grad():
-        x_recon, z, z_q = model(x)
-        loss, loss_dict = model.compute_loss(x, x_recon, z, z_q)
-
-    print(f"Input shape: {x.shape}")
-    print(f"Latent shape: {z.shape}")
-    print(f"Quantized latent shape: {z_q.shape}")
-    print(f"Reconstruction shape: {x_recon.shape}")
-    print(f"Codebook size: {model.quantizer.codebook_size}")
-    print(f"Loss: {loss.item():.4f}")
-    print("FSQ-VAE test passed!")

@@ -7,7 +7,7 @@ import multiprocessing as mp
 import os
 import time
 import warnings
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, as_completed, wait
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from typing import Dict, List, Optional, Tuple
 
 import gymnasium as gym
@@ -1490,100 +1490,3 @@ class WorldModelDataset(torch.utils.data.Dataset):
         }
 
 
-def test_parallel_performance():
-    """Test parallel vs sequential collection performance."""
-    print("🏃‍♂️ Testing Parallel Data Collection Performance")
-    print("=" * 60)
-
-    num_test_episodes = 100
-    max_length = 200
-
-    # Test sequential
-    print("\n1️⃣ Sequential Collection:")
-    config_seq = DataConfig()
-    config_seq.num_rollouts = num_test_episodes
-    config_seq.max_episode_length = max_length
-    config_seq.num_workers = 1  # Force sequential
-
-    collector_seq = DataCollector(config_seq)
-    start_time = time.time()
-    episodes_seq = collector_seq.collect_random_episodes(num_test_episodes)
-    seq_time = time.time() - start_time
-    collector_seq.close()
-
-    # Test parallel
-    print("\n2️⃣ Parallel Collection:")
-    config_par = DataConfig()
-    config_par.num_rollouts = num_test_episodes
-    config_par.max_episode_length = max_length
-    config_par.num_workers = -1  # Auto-detect workers
-
-    collector_par = DataCollector(config_par)
-    start_time = time.time()
-    episodes_par = collector_par.collect_random_episodes(num_test_episodes)
-    par_time = time.time() - start_time
-    collector_par.close()
-
-    # Compare results
-    print(f"\n🏆 Performance Comparison:")
-    print(f"  Sequential time: {seq_time:.1f}s")
-    print(f"  Parallel time:   {par_time:.1f}s")
-    print(f"  Speedup:         {seq_time/par_time:.2f}x")
-    print(f"  Episodes collected: {len(episodes_seq)} vs {len(episodes_par)}")
-
-    return episodes_par[:5]  # Return small subset for further testing
-
-
-if __name__ == "__main__":
-    # Test parallel performance
-    episodes = test_parallel_performance()
-
-    if not episodes:
-        print("⚠️  No episodes collected, falling back to basic test")
-        # Fallback to basic test
-        config = DataConfig()
-        config.num_rollouts = 5
-        config.max_episode_length = 100
-        collector = DataCollector(config)
-        episodes = collector.collect_random_episodes(config.num_rollouts)
-        collector.close()
-
-    # Test data processing pipeline
-    print(f"\n🧪 Testing Data Processing Pipeline:")
-
-    # Print statistics
-    lengths = [len(ep) for ep in episodes]
-    returns = [sum(ep.rewards) for ep in episodes]
-
-    print(f"  Episodes: {len(episodes)}")
-    print(f"  Avg length: {np.mean(lengths):.1f} ± {np.std(lengths):.1f}")
-    print(f"  Avg return: {np.mean(returns):.2f} ± {np.std(returns):.2f}")
-    print(f"  Total steps: {sum(lengths)}")
-
-    # Test saving/loading
-    config = DataConfig()
-    collector = DataCollector(config)
-    collector.save_episodes(episodes, "test_parallel_data.h5")
-    loaded_episodes = collector.load_episodes("test_parallel_data.h5")
-    assert len(loaded_episodes) == len(episodes)
-    print(f"  ✅ Save/Load test passed")
-
-    # Test datasets
-    seq_dataset = SequenceDataset(episodes, sequence_length=10)
-    img_dataset = ImageDataset(episodes)
-
-    print(f"  Sequence dataset size: {len(seq_dataset)}")
-    print(f"  Image dataset size: {len(img_dataset)}")
-
-    # Test data loading
-    if len(seq_dataset) > 0:
-        sample_seq = seq_dataset[0]
-        print(f"  Sample sequence shapes:")
-        for key, tensor in sample_seq.items():
-            print(f"    {key}: {tensor.shape}")
-
-    if len(img_dataset) > 0:
-        sample_img = img_dataset[0]
-        print(f"  Sample image shape: {sample_img.shape}")
-
-    print("\n✅ All tests passed! Parallel data collection is ready.")

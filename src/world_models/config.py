@@ -414,10 +414,3 @@ class WorldModelAgentConfig(BaseModel):
             return [level] * 5
 
 
-if __name__ == "__main__":
-    # Test configuration creation and validation
-    config = WorldModelAgentConfig()
-    config.validate_consistency()
-    print("Configuration validation passed!")
-    print(f"FSQ codebook size: {config.fsq_vae.fsq_levels}")
-    print(f"Total codes: {sum(config.fsq_vae.fsq_levels)}")
