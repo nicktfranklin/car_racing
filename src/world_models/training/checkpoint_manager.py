@@ -9,8 +9,10 @@ import os
 from typing import Optional
 
 from ..config import WorldModelAgentConfig
+from ..lightning_training import VAELightningModule, WorldModelLightningModule
 from ..models.fsq_vae import FSQVAE
 from ..models.world_model import WorldModel
+from ..training import VAETrainer, WorldModelTrainer
 from ..utils import get_logger
 
 logger = get_logger("world_models")
@@ -91,8 +93,6 @@ class CheckpointManager:
         if checkpoint_path.endswith(".ckpt"):
             # Lightning checkpoint
             logger.info(f"Loading VAE from Lightning checkpoint: {checkpoint_path}")
-            from ..lightning_training import VAELightningModule
-
             vae_module = VAELightningModule.load_from_checkpoint(
                 checkpoint_path, model=vae, config=self.config, strict=False
             )
@@ -101,8 +101,6 @@ class CheckpointManager:
         else:
             # Legacy checkpoint
             logger.info(f"Loading VAE from legacy checkpoint: {checkpoint_path}")
-            from .. import VAETrainer
-
             vae_trainer = VAETrainer(vae, self.config)
             vae_trainer.load_checkpoint(checkpoint_path)
             logger.info("Loaded trained VAE from legacy checkpoint")
@@ -134,8 +132,6 @@ class CheckpointManager:
             logger.info(
                 f"Loading World Model from Lightning checkpoint: {checkpoint_path}"
             )
-            from ..lightning_training import WorldModelLightningModule
-
             # Need to load VAE first for WorldModelLightningModule
             vae = self.load_vae(use_perceptual_loss=False)
 
@@ -149,8 +145,6 @@ class CheckpointManager:
             logger.info(
                 f"Loading World Model from legacy checkpoint: {checkpoint_path}"
             )
-            from .. import WorldModelTrainer
-
             # Need VAE for legacy trainer
             vae = self.load_vae(use_perceptual_loss=False)
 

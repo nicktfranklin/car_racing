@@ -2,8 +2,7 @@
 Training loops for World Model components.
 """
 
-import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 
 import numpy as np
 import torch
@@ -13,8 +12,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from .config import WorldModelAgentConfig
-from .data_collection import DataCollector, ImageDataset, SequenceDataset
-from .models.controller import Controller, EvolutionaryController, evaluate_controller
+from .data_collection import ImageDataset, SequenceDataset
+from .models.controller import EvolutionaryController
 from .models.fsq_vae import FSQVAE
 from .models.world_model import WorldModel
 
@@ -600,8 +599,6 @@ class ControllerTrainer:
 
 if __name__ == "__main__":
     # Test training components
-    from .config import WorldModelAgentConfig
-
     config = WorldModelAgentConfig()
     config.validate_consistency()
 

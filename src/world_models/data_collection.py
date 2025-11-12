@@ -14,6 +14,7 @@ import gymnasium as gym
 import h5py
 import numpy as np
 import torch
+from skimage.transform import resize
 from tqdm import tqdm
 
 # Suppress warnings
@@ -98,8 +99,6 @@ def collect_episodes_worker(
         obs, _ = env.reset()
 
         # Preprocess observation - keep as uint8 for efficient storage
-        from skimage.transform import resize
-
         obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(
             np.uint8
         )
@@ -481,8 +480,6 @@ class DataCollector:
 
     def _preprocess_observation(self, obs: np.ndarray) -> np.ndarray:
         """Preprocess observation - keep as uint8 for efficient storage."""
-        from skimage.transform import resize
-
         # Resize from 96x96 to 64x64 and keep as uint8 [0, 255]
         # Don't normalize to [0, 1] - that happens at load time
         obs = resize(obs, (64, 64), anti_aliasing=True, preserve_range=True).astype(
