@@ -4,7 +4,7 @@ Data collection system for World Model training.
 
 import os
 import warnings
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import h5py
 import numpy as np

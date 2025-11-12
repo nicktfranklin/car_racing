@@ -15,14 +15,8 @@ import numpy as np
 from skimage.transform import resize
 from tqdm import tqdm
 
-from ..config import WorldModelAgentConfig
+from ..config import DataConfig, WorldModelAgentConfig
 from ..utils import get_logger
-
-try:
-    from ..config import DataConfig
-except ImportError:
-    # For direct execution
-    from config import DataConfig
 
 
 class Episode:

@@ -11,8 +11,8 @@ from skimage.transform import resize
 
 from ..config import WorldModelAgentConfig
 from ..models.controller import EvolutionaryController
+from ..training.checkpoint_manager import CheckpointManager
 from ..utils import get_logger
-from .checkpoint_manager import CheckpointManager
 
 
 def evaluate_agent(config: WorldModelAgentConfig, num_episodes: int = 10):
