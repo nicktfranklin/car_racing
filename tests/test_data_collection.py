@@ -11,9 +11,9 @@ import numpy as np
 import pytest
 import torch
 
-from world_models import DataCollector
 from world_models.config import DataConfig
-from world_models.datasets import Episode, ImageDataset, SequenceDataset
+from world_models.training.data_collection import DataCollector, Episode
+from world_models.training.datasets import ImageDataset, SequenceDataset
 
 
 @pytest.fixture

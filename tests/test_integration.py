@@ -97,7 +97,9 @@ class TestWorldModel:
         batch_size = 4
         seq_len = 10
 
-        state_indices = torch.randint(0, world_model.num_state_tokens, (batch_size, seq_len))
+        state_indices = torch.randint(
+            0, world_model.num_state_tokens, (batch_size, seq_len)
+        )
         actions = torch.randn(batch_size, seq_len, config.world_model.action_dim)
 
         with torch.no_grad():
@@ -106,7 +108,11 @@ class TestWorldModel:
             )
 
         # Check shapes
-        assert next_state_logits.shape == (batch_size, seq_len, world_model.num_state_tokens)
+        assert next_state_logits.shape == (
+            batch_size,
+            seq_len,
+            world_model.num_state_tokens,
+        )
         assert pred_rewards.shape == (batch_size, seq_len, 1)
         assert pred_dones.shape == (batch_size, seq_len, 1)
 
@@ -115,9 +121,13 @@ class TestWorldModel:
         batch_size = 4
         seq_len = 10
 
-        state_indices = torch.randint(0, world_model.num_state_tokens, (batch_size, seq_len))
+        state_indices = torch.randint(
+            0, world_model.num_state_tokens, (batch_size, seq_len)
+        )
         actions = torch.randn(batch_size, seq_len, config.world_model.action_dim)
-        next_state_indices = torch.randint(0, world_model.num_state_tokens, (batch_size, seq_len))
+        next_state_indices = torch.randint(
+            0, world_model.num_state_tokens, (batch_size, seq_len)
+        )
         rewards = torch.randn(batch_size, seq_len)
         dones = torch.randint(0, 2, (batch_size, seq_len))
 
@@ -138,8 +148,8 @@ class TestWorldModel:
         actions = torch.randn(1, 1, config.world_model.action_dim)
 
         with torch.no_grad():
-            next_state_sample, reward_sample, done_sample, _ = world_model.sample_next_state(
-                state_indices, actions, temperature=1.0
+            next_state_sample, reward_sample, done_sample, _ = (
+                world_model.sample_next_state(state_indices, actions, temperature=1.0)
             )
 
         # Check shapes
@@ -158,7 +168,9 @@ class TestControllers:
 
         with torch.no_grad():
             actions = controller(state)
-            single_action = controller.get_action(torch.randn(config.controller.state_dim))
+            single_action = controller.get_action(
+                torch.randn(config.controller.state_dim)
+            )
 
         # Check shapes
         assert actions.shape == (batch_size, config.controller.action_dim)

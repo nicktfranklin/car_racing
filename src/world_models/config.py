@@ -412,5 +412,3 @@ class WorldModelAgentConfig(BaseModel):
 
             level = int(math.ceil(target_size ** (1 / 5)))
             return [level] * 5
-
-

@@ -6,13 +6,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from world_models import (
-    FSQVAE,
-    DataCollector,
-    ImageDataset,
-    VAELightningModule,
-    WorldModelAgentConfig,
-)
+from world_models import FSQVAE, ImageDataset, VAELightningModule, WorldModelAgentConfig
+from world_models.training.data_collection import DataCollector
 
 
 def main():

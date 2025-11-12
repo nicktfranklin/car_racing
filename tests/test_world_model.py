@@ -13,7 +13,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from world_models.config import WorldModelAgentConfig, WorldModelConfig
+from world_models.config import WorldModelConfig
 from world_models.models.world_model import WorldModel
 
 

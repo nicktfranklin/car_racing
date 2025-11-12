@@ -338,5 +338,3 @@ def evaluate_controller(
         total_return += episode_return
 
     return total_return / num_episodes
-
-

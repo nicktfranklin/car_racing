@@ -9,13 +9,6 @@ __version__ = "0.1.0"
 
 from .agents import Agent, HumanAgent, RandomAgent, WorldModelAgent, create_agent
 from .config import WorldModelAgentConfig
-from .datasets import (
-    DataCollector,
-    ImageDataset,
-    SequenceDataset,
-    VAEDataset,
-    WorldModelDataset,
-)
 from .lightning_training import (
     ChunkRotationCallback,
     VAELightningModule,
@@ -25,6 +18,13 @@ from .lightning_training import (
 )
 from .models import FSQVAE, Controller, EvolutionaryController, WorldModel
 from .training.controller_trainer import ControllerTrainer
+from .training.data_collection import DataCollector
+from .training.datasets import (
+    ImageDataset,
+    SequenceDataset,
+    VAEDataset,
+    WorldModelDataset,
+)
 from .utils import get_logger, setup_logger, setup_output_logging
 
 __all__ = [

@@ -3,11 +3,11 @@ World Model training using PyTorch Lightning.
 """
 
 from ..config import WorldModelAgentConfig
-from ..datasets import WorldModelDataset
 from ..lightning_training import WorldModelLightningModule
 from ..models.world_model import WorldModel
 from ..utils import get_logger
 from .checkpoint_manager import CheckpointManager
+from .datasets import WorldModelDataset
 from .lightning_setup import (
     create_dataloaders,
     create_dataset,

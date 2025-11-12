@@ -559,5 +559,3 @@ class FSQVAE(nn.Module):
             loss_dict["perplexity_ratio"] = perplexity_ratio.item()  # Normalized (0-1)
 
         return total_loss, loss_dict
-
-

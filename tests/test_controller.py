@@ -149,12 +149,16 @@ class TestEvolutionaryController:
         # Small mutation
         original_params = evo_controller.get_parameters_flat().clone()
         evo_controller.mutate(0.01)
-        small_change = torch.norm(evo_controller.get_parameters_flat() - original_params)
+        small_change = torch.norm(
+            evo_controller.get_parameters_flat() - original_params
+        )
 
         # Reset and do large mutation
         evo_controller.set_parameters_flat(original_params.clone())
         evo_controller.mutate(1.0)
-        large_change = torch.norm(evo_controller.get_parameters_flat() - original_params)
+        large_change = torch.norm(
+            evo_controller.get_parameters_flat() - original_params
+        )
 
         # Larger noise should generally produce larger changes
         # (statistical test - may occasionally fail)

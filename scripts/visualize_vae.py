@@ -14,7 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from world_models import FSQVAE, DataCollector, ImageDataset, WorldModelAgentConfig
+from world_models import FSQVAE, ImageDataset, WorldModelAgentConfig
+from world_models.training.data_collection import DataCollector
 
 
 def load_vae(
