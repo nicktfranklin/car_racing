@@ -8,11 +8,10 @@ import time
 from typing import Optional
 
 import gymnasium as gym
-import numpy as np
 import pygame
 import torch
 
-from world_models import FSQVAE, EvolutionaryController, WorldModelAgentConfig
+from world_models import EvolutionaryController, WorldModelAgentConfig
 from world_models.agents import Agent, create_agent
 
 

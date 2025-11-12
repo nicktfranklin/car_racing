@@ -3,7 +3,6 @@
 Test script to verify all World Model components work correctly.
 """
 
-import numpy as np
 import torch
 
 from world_models import (

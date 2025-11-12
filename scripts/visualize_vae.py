@@ -9,19 +9,12 @@ This script provides validation of the trained VAE by:
 
 import argparse
 import os
-from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from world_models import (
-    FSQVAE,
-    DataCollector,
-    ImageDataset,
-    VAELightningModule,
-    WorldModelAgentConfig,
-)
+from world_models import FSQVAE, DataCollector, ImageDataset, WorldModelAgentConfig
 
 
 def load_vae(
