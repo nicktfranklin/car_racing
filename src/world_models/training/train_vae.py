@@ -3,7 +3,7 @@ VAE training using PyTorch Lightning.
 """
 
 from ..config import WorldModelAgentConfig
-from ..data_collection import VAEDataset
+from ..datasets import VAEDataset
 from ..lightning_training import VAELightningModule
 from ..models.fsq_vae import FSQVAE
 from ..utils import get_logger

@@ -9,7 +9,7 @@ __version__ = "0.1.0"
 
 from .agents import Agent, HumanAgent, RandomAgent, WorldModelAgent, create_agent
 from .config import WorldModelAgentConfig
-from .data_collection import (
+from .datasets import (
     DataCollector,
     ImageDataset,
     SequenceDataset,

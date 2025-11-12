@@ -3,7 +3,7 @@ Data collection for World Model training.
 """
 
 from ..config import WorldModelAgentConfig
-from ..data_collection import DataCollector
+from ..datasets import DataCollector
 from ..utils import get_logger
 
 

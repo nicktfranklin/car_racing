@@ -13,7 +13,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from ..config import WorldModelAgentConfig
-from ..data_collection import (
+from ..datasets import (
     DataCollector,
     ImageDataset,
     SequenceDataset,

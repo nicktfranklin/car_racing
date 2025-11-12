@@ -13,7 +13,7 @@ import torch
 
 from world_models import DataCollector
 from world_models.config import DataConfig
-from world_models.data_collection import Episode, ImageDataset, SequenceDataset
+from world_models.datasets import Episode, ImageDataset, SequenceDataset
 
 
 @pytest.fixture
