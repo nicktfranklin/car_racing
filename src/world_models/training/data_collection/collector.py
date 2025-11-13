@@ -31,6 +31,8 @@ class DataCollector:
 
     def __init__(self, config: DataConfig):
         self.config = config
+        # Expand tilde in data_dir to absolute path
+        self.config.data_dir = os.path.expanduser(self.config.data_dir)
         self.env = None
 
     def setup_env(self):
