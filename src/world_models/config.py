@@ -326,6 +326,56 @@ class TrainingConfig(BaseModel):
     )
 
 
+class EvaluationConfig(BaseModel):
+    """Configuration for model evaluation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Evaluation episodes
+    num_episodes: int = Field(default=10, description="Number of episodes to evaluate")
+    max_episode_length: int = Field(
+        default=2000, description="Maximum steps per episode"
+    )
+
+    # Evaluation modes
+    eval_real: bool = Field(default=True, description="Evaluate in real environment")
+    eval_dream: bool = Field(
+        default=False, description="Evaluate in dream environment"
+    )
+
+    # Dream environment settings
+    dream_initial_state: str = Field(
+        default="random",
+        description="Initial state for dream rollouts: 'random' or 'real'",
+    )
+    dream_temperature: float = Field(
+        default=1.0, description="Sampling temperature for world model"
+    )
+
+    # Video recording
+    save_video: bool = Field(default=False, description="Save video recordings")
+    video_fps: int = Field(default=30, description="Video frames per second")
+    video_comparison: bool = Field(
+        default=False,
+        description="Create side-by-side comparison videos (real vs reconstruction)",
+    )
+
+    # Visualization
+    render_mode: Optional[str] = Field(
+        default=None,
+        description="Render mode for real-time visualization (None, 'human', 'rgb_array')",
+    )
+
+    # Output paths
+    output_dir: str = Field(
+        default="./evaluations", description="Directory for evaluation outputs"
+    )
+    save_metrics: bool = Field(default=True, description="Save metrics to JSON")
+
+    # Reproducibility
+    seed: Optional[int] = Field(default=None, description="Random seed for evaluation")
+
+
 class WorldModelAgentConfig(BaseModel):
     """Main configuration combining all components."""
 
@@ -336,6 +386,7 @@ class WorldModelAgentConfig(BaseModel):
     controller: ControllerConfig = Field(default_factory=ControllerConfig)
     data: DataConfig = Field(default_factory=DataConfig)
     training: TrainingConfig = Field(default_factory=TrainingConfig)
+    evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
 
     def validate_consistency(self) -> None:
         """Validate consistency between component configurations."""

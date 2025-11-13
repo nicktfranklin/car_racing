@@ -128,7 +128,7 @@ training:
   # World Model dataset parameters (sequential loading with subsampling)
   world_model_subsample_rate: 4  # Use every 4th frame
   world_model_files_per_chunk: 5  # Load 5 files at a time (~6GB)
-  world_model_sequence_length: 8  # Reduced from 64 due to autoregressive FSQ (16*5=80 tokens)
+  world_model_sequence_length: 4  # Reduced from 64 due to autoregressive FSQ (16*5=80 tokens)
 
   # Lightning training parameters - World Model
   world_model_batch_size: 16  # Smaller due to sequences
@@ -139,3 +139,31 @@ training:
   save_every: 25
   log_every: 100
   checkpoint_dir: ./checkpoints
+
+evaluation:
+  # Episodes
+  num_episodes: 10
+  max_episode_length: 10_000
+
+  # Modes
+  eval_real: true
+  eval_dream: false
+
+  # Dream environment
+  dream_initial_state: random  # 'random' or 'real'
+  dream_temperature: 1.0
+
+  # Video recording
+  save_video: false
+  video_fps: 30
+  video_comparison: false
+
+  # Visualization
+  render_mode: null  # null, 'human', or 'rgb_array'
+
+  # Output
+  output_dir: ./evaluations
+  save_metrics: true
+
+  # Reproducibility
+  seed: null

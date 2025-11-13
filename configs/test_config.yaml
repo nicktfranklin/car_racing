@@ -140,3 +140,30 @@ training:
   save_every: 25
   log_every: 10  # More frequent logging for testing
   checkpoint_dir: ./tmp_checkpoints
+
+evaluation:
+  # Fewer episodes for faster testing
+  num_episodes: 1
+  max_episode_length: 500
+
+  # Test both modes
+  eval_real: true
+  eval_dream: true
+
+  # Dream settings
+  dream_initial_state: random  # 'random' or 'real'
+  dream_temperature: 1.0
+
+  # Enable video for visual verification
+  save_video: true
+  video_fps: 30
+  video_comparison: true
+
+  # Human rendering for debugging
+  render_mode: human
+
+  # Output
+  output_dir: ./tmp_evaluations
+  save_metrics: true
+
+  seed: 42
