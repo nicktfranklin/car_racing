@@ -68,23 +68,23 @@ class TestWorldModelConfig:
         assert hasattr(config, "state_dim")
         assert hasattr(config, "action_dim")
         assert hasattr(config, "num_layers")
-        assert hasattr(config, "num_heads")
-        assert hasattr(config, "embed_dim")
+        assert hasattr(config, "n_heads")
+        assert hasattr(config, "hidden_size")
 
         # Check reasonable defaults
         assert config.state_dim > 0
         assert config.action_dim > 0
         assert config.num_layers > 0
-        assert config.num_heads > 0
-        assert config.embed_dim > 0
+        assert config.n_heads > 0
+        assert config.hidden_size > 0
 
     def test_transformer_config_valid(self):
         """Test that transformer configuration is valid."""
         config = WorldModelConfig()
 
         # Embedding dimension should be divisible by number of heads
-        if hasattr(config, "num_heads"):
-            assert config.embed_dim % config.num_heads == 0
+        if hasattr(config, "n_heads"):
+            assert config.hidden_size % config.n_heads == 0
 
 
 class TestControllerConfig:
@@ -97,12 +97,13 @@ class TestControllerConfig:
         # Check basic attributes exist
         assert hasattr(config, "state_dim")
         assert hasattr(config, "action_dim")
-        assert hasattr(config, "hidden_dim")
+        assert hasattr(config, "hidden_sizes")
 
         # Check reasonable defaults
         assert config.state_dim > 0
         assert config.action_dim > 0
-        assert config.hidden_dim > 0
+        assert len(config.hidden_sizes) > 0
+        assert all(h > 0 for h in config.hidden_sizes)
 
     def test_action_dim_valid(self):
         """Test that action dimension matches CarRacing."""
@@ -199,11 +200,14 @@ class TestWorldModelAgentConfig:
         config = WorldModelAgentConfig()
         config.validate_consistency()
 
-        # Controller state_dim should match FSQ-VAE latent_dim
-        assert config.controller.state_dim == config.fsq_vae.latent_dim
+        # Controller state_dim should match number of FSQ dimensions
+        assert config.controller.state_dim == len(config.fsq_vae.fsq_levels)
 
         # Controller action_dim should match World Model action_dim
         assert config.controller.action_dim == config.world_model.action_dim
+
+        # World model state_dim should match controller state_dim
+        assert config.world_model.state_dim == config.controller.state_dim
 
     def test_fsq_codebook_size(self):
         """Test that FSQ codebook size is reasonable."""
@@ -249,11 +253,11 @@ class TestConfigModification:
         config = ControllerConfig()
 
         # Modify a value
-        original_hidden_dim = config.hidden_dim
-        config.hidden_dim = 256
+        original_hidden_sizes = config.hidden_sizes.copy()
+        config.hidden_sizes = [256, 256, 128]
 
-        assert config.hidden_dim == 256
-        assert config.hidden_dim != original_hidden_dim
+        assert config.hidden_sizes == [256, 256, 128]
+        assert config.hidden_sizes != original_hidden_sizes
 
     def test_modify_optimizer_config(self):
         """Test modifying Optimizer configuration."""
@@ -268,9 +272,12 @@ class TestConfigModification:
         """Test that modified config can still validate."""
         config = WorldModelAgentConfig()
 
-        # Modify consistently
-        config.fsq_vae.latent_dim = 256
-        config.controller.state_dim = 256
+        # Modify consistently - change FSQ dimensions to 8
+        new_fsq_levels = [8, 8, 8, 8, 8, 8, 8, 8]
+        config.fsq_vae.fsq_levels = new_fsq_levels
+        config.world_model.fsq_levels = new_fsq_levels
+        config.world_model.state_dim = len(new_fsq_levels)
+        config.controller.state_dim = len(new_fsq_levels)
 
         # Should still validate
         config.validate_consistency()
@@ -279,12 +286,11 @@ class TestConfigModification:
         """Test that inconsistent modifications fail validation."""
         config = WorldModelAgentConfig()
 
-        # Modify inconsistently
-        config.fsq_vae.latent_dim = 256
-        config.controller.state_dim = 128  # Different value
+        # Modify inconsistently - controller state_dim doesn't match len(fsq_levels)
+        config.controller.state_dim = 10  # Doesn't match len(fsq_levels) = 4
 
         # Should fail validation
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             config.validate_consistency()
 
 

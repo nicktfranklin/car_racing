@@ -112,23 +112,24 @@ class TestEpisode:
     def test_episode_properties(self, sample_episodes):
         """Test Episode properties."""
         for episode in sample_episodes:
-            # All arrays should have same length
+            # All lists should have same length
             length = len(episode.observations)
             assert len(episode.actions) == length
             assert len(episode.rewards) == length
             assert len(episode.dones) == length
 
-            # Check data types
-            assert isinstance(episode.observations, np.ndarray)
-            assert isinstance(episode.actions, np.ndarray)
-            assert isinstance(episode.rewards, np.ndarray)
-            assert isinstance(episode.dones, np.ndarray)
+            # Check data types - Episode stores as lists
+            assert isinstance(episode.observations, list)
+            assert isinstance(episode.actions, list)
+            assert isinstance(episode.rewards, list)
+            assert isinstance(episode.dones, list)
 
-            # Check shapes
-            assert episode.observations.shape[0] == length
-            assert episode.actions.shape[0] == length
-            assert episode.rewards.shape[0] == length
-            assert episode.dones.shape[0] == length
+            # Check that to_arrays() works
+            obs_arr, act_arr, rew_arr, done_arr = episode.to_arrays()
+            assert obs_arr.shape[0] == length
+            assert act_arr.shape[0] == length
+            assert rew_arr.shape[0] == length
+            assert done_arr.shape[0] == length
 
     def test_episode_statistics(self, sample_episodes):
         """Test episode statistics."""
@@ -169,7 +170,9 @@ class TestSequenceDataset:
             sample = dataset[0]
 
             # Check sequence length dimension
-            assert sample["observations"].shape[0] == seq_length
+            # Observations include next state for prediction (seq_length + 1)
+            # Actions, rewards, dones have seq_length elements
+            assert sample["observations"].shape[0] == seq_length + 1
             assert sample["actions"].shape[0] == seq_length
             assert sample["rewards"].shape[0] == seq_length
             assert sample["dones"].shape[0] == seq_length

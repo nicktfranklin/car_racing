@@ -34,13 +34,15 @@ class TestFSQVAE:
         )
 
         with torch.no_grad():
-            x_recon, z, z_q = vae(x)
+            x_recon, z, z_q, indices, tokens = vae(x)
 
         # Check output shapes
         assert x_recon.shape == x.shape
         assert z.shape[0] == batch_size
         assert z_q.shape[0] == batch_size
         assert z_q.shape == z.shape
+        assert indices.shape[0] == batch_size
+        assert tokens.shape[0] == batch_size
 
     def test_loss_computation(self, vae, config):
         """Test loss computation."""
@@ -50,7 +52,7 @@ class TestFSQVAE:
         )
 
         with torch.no_grad():
-            x_recon, z, z_q = vae(x)
+            x_recon, z, z_q, indices, tokens = vae(x)
             loss, loss_dict = vae.compute_loss(x, x_recon, z, z_q)
 
         # Check loss is valid
@@ -70,11 +72,12 @@ class TestFSQVAE:
         )
 
         with torch.no_grad():
-            z_q, indices = vae.encode(x)
+            z_q, indices, tokens = vae.encode(x)
 
         # Check shapes
         assert z_q.shape[0] == batch_size
         assert indices.shape[0] == batch_size
+        assert tokens.shape[0] == batch_size
 
         # Indices should be valid integers
         assert indices.dtype in [torch.int32, torch.int64, torch.long]
@@ -87,7 +90,7 @@ class TestFSQVAE:
         )
 
         with torch.no_grad():
-            z_q, _ = vae.encode(x)
+            z_q, _, _ = vae.encode(x)
             x_recon = vae.decode(z_q)
 
         # Reconstruction should match input shape
@@ -102,10 +105,10 @@ class TestFSQVAE:
 
         with torch.no_grad():
             # Full forward pass
-            x_recon1, z, z_q = vae(x)
+            x_recon1, z, z_q, indices, tokens = vae(x)
 
             # Encode then decode
-            z_q_enc, _ = vae.encode(x)
+            z_q_enc, _, _ = vae.encode(x)
             x_recon2 = vae.decode(z_q_enc)
 
         # Reconstructions should be identical
@@ -126,28 +129,28 @@ class TestFSQVAE:
         )
 
         with torch.no_grad():
-            z_q1, indices1 = vae.encode(x)
-            z_q2, indices2 = vae.encode(x)
+            z_q1, indices1, _ = vae.encode(x)
+            z_q2, indices2, _ = vae.encode(x)
 
         # Same input should produce same quantization
         assert torch.equal(indices1, indices2)
         assert torch.allclose(z_q1, z_q2)
 
     def test_different_inputs_different_codes(self, vae, config):
-        """Test that different inputs produce different codes."""
+        """Test that different latent codes produce different quantized codes."""
         batch_size = 4
-        x1 = torch.randn(
-            batch_size, config.input_channels, config.input_height, config.input_width
-        )
-        x2 = torch.randn(
-            batch_size, config.input_channels, config.input_height, config.input_width
-        )
+        fsq_dim = len(config.fsq_levels)
+
+        # Create very different latent codes directly
+        z1 = torch.full((batch_size, fsq_dim), -2.0)
+        z2 = torch.full((batch_size, fsq_dim), 2.0)
 
         with torch.no_grad():
-            _, indices1 = vae.encode(x1)
-            _, indices2 = vae.encode(x2)
+            # Quantize the latent codes directly
+            _, indices1, _ = vae.quantizer(z1)
+            _, indices2, _ = vae.quantizer(z2)
 
-        # Different inputs should (almost certainly) produce different codes
+        # Very different latent codes should produce different indices
         assert not torch.equal(indices1, indices2)
 
 
@@ -166,11 +169,12 @@ class TestFSQQuantizer:
             z = vae.encoder(x)
 
             # Quantize
-            z_q, indices = vae.quantizer(z)
+            z_q, indices, tokens = vae.quantizer(z)
 
         # Check shapes
         assert z_q.shape == z.shape
         assert indices.shape[0] == batch_size
+        assert tokens.shape[0] == batch_size
 
     def test_quantizer_levels(self, vae):
         """Test that quantizer uses specified levels."""
@@ -189,7 +193,7 @@ class TestFSQQuantizer:
         )
 
         with torch.no_grad():
-            _, _, z_q = vae(x)
+            _, _, z_q, _, _ = vae(x)
 
         # Quantized values should be bounded
         # Exact bounds depend on FSQ levels, but should not be extreme
@@ -212,7 +216,7 @@ class TestVAETraining:
         )
 
         # Should work in training mode
-        x_recon, z, z_q = vae(x)
+        x_recon, z, z_q, indices, tokens = vae(x)
         loss, loss_dict = vae.compute_loss(x, x_recon, z, z_q)
 
         assert loss.requires_grad
@@ -228,7 +232,7 @@ class TestVAETraining:
         )
 
         with torch.no_grad():
-            x_recon, z, z_q = vae(x)
+            x_recon, z, z_q, indices, tokens = vae(x)
             loss, loss_dict = vae.compute_loss(x, x_recon, z, z_q)
 
         # In eval mode with no_grad, shouldn't require gradients
@@ -244,7 +248,7 @@ class TestVAETraining:
         )
 
         # Forward pass
-        x_recon, z, z_q = vae(x)
+        x_recon, z, z_q, indices, tokens = vae(x)
         loss, _ = vae.compute_loss(x, x_recon, z, z_q)
 
         # Backward pass

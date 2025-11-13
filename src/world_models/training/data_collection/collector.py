@@ -5,8 +5,13 @@ Data collector for World Model training.
 import gc
 import multiprocessing as mp
 import os
+import warnings
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from typing import List
+
+# Suppress third-party library warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="importlib")
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 import gymnasium as gym
 import h5py
