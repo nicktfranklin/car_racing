@@ -9,10 +9,10 @@ import os
 from typing import Optional
 
 from ..config import WorldModelAgentConfig
-from .lightning import VAELightningModule, WorldModelLightningModule
 from ..models.fsq_vae import FSQVAE
 from ..models.world_model import WorldModel
 from ..utils import get_logger
+from .lightning import VAELightningModule, WorldModelLightningModule
 
 logger = get_logger("world_models")
 
@@ -98,7 +98,7 @@ class CheckpointManager:
 
         return vae
 
-    def load_world_model(self) -> WorldModel:
+    def load_world_model(self, device: None | str = None) -> WorldModel:
         """
         Load trained World Model from checkpoint.
 
@@ -107,6 +107,9 @@ class CheckpointManager:
         """
         # Create world model
         world_model = WorldModel(self.config.world_model)
+        if device is None:
+            device = self.config.training.device
+        world_model = world_model.to(device)
 
         # Find checkpoint
         checkpoint_path = self.find_latest_checkpoint("world_model")
@@ -123,7 +126,10 @@ class CheckpointManager:
         vae = self.load_vae(use_perceptual_loss=False)
 
         wm_module = WorldModelLightningModule.load_from_checkpoint(
-            checkpoint_path, world_model=world_model, vae=vae, config=self.config
+            checkpoint_path,
+            world_model=world_model,
+            vae=vae,
+            config=self.config,
         )
         world_model = wm_module.world_model
         logger.info("Loaded trained World Model from Lightning checkpoint")
