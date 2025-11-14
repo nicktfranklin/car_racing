@@ -96,7 +96,9 @@ def create_dataloaders(
         Tuple of (train_loader, val_loader)
     """
     pin_memory = config.training.device == "cuda"
-    num_workers = 0  # Use num_workers=0 for sequential chunked loading
+
+    # Use config setting
+    num_workers = config.training.num_dataloader_workers
 
     if model_type == "vae":
         train_loader, val_loader = create_train_val_dataloaders(
