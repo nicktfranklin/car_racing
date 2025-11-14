@@ -132,7 +132,7 @@ training:
   world_model_sequence_length: 4  # Reduced from 64 due to autoregressive FSQ (16*5=80 tokens)
 
   # Lightning training parameters - World Model
-  world_model_batch_size: 16  # Smaller due to sequences
+  world_model_batch_size: 256  # Smaller due to sequences
   world_model_steps_per_epoch: 2_000
   world_model_val_samples: 200
 
