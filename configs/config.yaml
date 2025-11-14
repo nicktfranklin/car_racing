@@ -120,7 +120,7 @@ training:
   val_samples: 200
   val_split: 0.05
   early_stopping_patience: 10
-  num_dataloader_workers: 0  # Sequential chunk loading uses 0
+  num_dataloader_workers: 4  # Sequential chunk loading uses 0
 
   # VAE dataset parameters (sequential loading with subsampling)
   vae_subsample_rate: 16  # Use every 10th frame for decorrelation
