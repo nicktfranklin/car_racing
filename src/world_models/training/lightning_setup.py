@@ -37,8 +37,14 @@ def create_dataset(model_type: str, config: WorldModelAgentConfig, data_file: st
     Returns:
         Dataset instance
     """
+    print(f"\n[create_dataset] Creating {model_type} dataset:")
+    print(f"  Data file: {data_file}")
+    print(f"  Config data_dir: {config.data.data_dir}")
+
     collector = DataCollector(config.data)
     chunk_files = collector.get_chunk_files(data_file)
+
+    print(f"  Chunk files returned: {len(chunk_files)} files")
 
     if model_type == "vae":
         if chunk_files:

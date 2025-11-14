@@ -131,8 +131,13 @@ def main():
     config.validate_consistency()
 
     # Create directories
+    print(f"\n[Train] Creating directories:")
+    print(f"  Data directory: {config.data.data_dir}")
     os.makedirs(config.data.data_dir, exist_ok=True)
+    print(f"    Created/exists: {os.path.exists(config.data.data_dir)}")
+    print(f"  Checkpoint directory: {config.training.checkpoint_dir}")
     os.makedirs(config.training.checkpoint_dir, exist_ok=True)
+    print(f"    Created/exists: {os.path.exists(config.training.checkpoint_dir)}")
 
     logger.info("=" * 50)
     logger.info("World Model Training Pipeline")
