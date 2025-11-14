@@ -116,7 +116,7 @@ training:
   train_controller_epochs: 1_000
 
   # Lightning training parameters - VAE
-  steps_per_epoch: 500
+  steps_per_epoch: 2_000
   val_samples: 200
   val_split: 0.05
   early_stopping_patience: 10
@@ -133,7 +133,7 @@ training:
 
   # Lightning training parameters - World Model
   world_model_batch_size: 16  # Smaller due to sequences
-  world_model_steps_per_epoch: 200
+  world_model_steps_per_epoch: 2_000
   world_model_val_samples: 200
 
   eval_every: 10
