@@ -104,7 +104,7 @@ data:
   episodes_per_batch: 10  # Episodes per worker (higher = faster, more memory)
   frame_skip: 4
   frame_stack: 1
-  data_dir: /data/rollouts/
+  data_dir: /workspace/data/rollouts/
 
 training:
   device: cuda
