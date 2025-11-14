@@ -13,14 +13,14 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from ..config import WorldModelAgentConfig
+from ..utils import get_logger
+from .data_collection import DataCollector
+from .datasets import ImageDataset, SequenceDataset, VAEDataset, WorldModelDataset
 from .lightning import (
     ChunkRotationCallback,
     create_sequence_train_val_dataloaders,
     create_train_val_dataloaders,
 )
-from ..utils import get_logger
-from .data_collection import DataCollector
-from .datasets import ImageDataset, SequenceDataset, VAEDataset, WorldModelDataset
 
 logger = get_logger("world_models")
 
