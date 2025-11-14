@@ -309,8 +309,9 @@ class WorldModelDataset(torch.utils.data.Dataset):
         num_sequences = len(sequence_info)
 
         # Pre-allocate arrays for all sequences
+        # Use uint8 for observations to save 4x memory (normalize on-the-fly in __getitem__)
         observations = np.empty(
-            (num_sequences, self.sequence_length, 64, 64, 3), dtype=np.float32
+            (num_sequences, self.sequence_length, 64, 64, 3), dtype=np.uint8
         )
         actions = np.empty(
             (num_sequences, self.sequence_length - 1, 3), dtype=np.float32
@@ -353,11 +354,10 @@ class WorldModelDataset(torch.utils.data.Dataset):
 
             # Load observations sequentially instead of fancy indexing
             # This avoids slow HDF5 fancy indexing that can cause blocking I/O
+            # Store as uint8 to save memory (normalize on-the-fly in __getitem__)
             obs_dataset = ep_group["observations"]
             for j, frame_idx in enumerate(actual_frame_indices):
-                observations[seq_idx, j] = (
-                    obs_dataset[frame_idx].astype(np.float32) / 255.0
-                )
+                observations[seq_idx, j] = obs_dataset[frame_idx]
 
             # Load other data sequentially
             actions_dataset = ep_group["actions"]
@@ -396,10 +396,12 @@ class WorldModelDataset(torch.utils.data.Dataset):
         return len(self.observations)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        """Get sequence from current chunk - already pre-processed."""
-        # Data is already normalized and in correct format
+        """Get sequence from current chunk - normalize observations on-the-fly."""
+        # Normalize uint8 [0, 255] to float32 [0, 1] on-the-fly to save memory
+        obs = self.observations[idx].astype(np.float32) / 255.0
+
         return {
-            "observations": torch.from_numpy(self.observations[idx]).permute(
+            "observations": torch.from_numpy(obs).permute(
                 0, 3, 1, 2
             ),  # (T, C, H, W)
             "actions": torch.from_numpy(self.actions[idx]),

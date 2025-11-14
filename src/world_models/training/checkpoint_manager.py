@@ -91,9 +91,14 @@ class CheckpointManager:
         # Load Lightning checkpoint
         logger.info(f"Loading VAE from Lightning checkpoint: {checkpoint_path}")
         vae_module = VAELightningModule.load_from_checkpoint(
-            checkpoint_path, model=vae, config=self.config, strict=False
+            checkpoint_path,
+            model=vae,
+            config=self.config,
+            strict=False,
+            map_location=device,  # Load directly to target device
         )
         vae = vae_module.model
+
         logger.info("Loaded trained VAE from Lightning checkpoint")
 
         return vae
@@ -109,7 +114,6 @@ class CheckpointManager:
         world_model = WorldModel(self.config.world_model)
         if device is None:
             device = self.config.training.device
-        world_model = world_model.to(device)
 
         # Find checkpoint
         checkpoint_path = self.find_latest_checkpoint("world_model")
@@ -120,18 +124,21 @@ class CheckpointManager:
             )
             return world_model
 
+        # Load VAE (required by WorldModelLightningModule)
+        vae = self.load_vae(device=device)
+
         # Load Lightning checkpoint
         logger.info(f"Loading World Model from Lightning checkpoint: {checkpoint_path}")
-        # Need to load VAE first for WorldModelLightningModule
-        vae = self.load_vae(use_perceptual_loss=False)
-
         wm_module = WorldModelLightningModule.load_from_checkpoint(
             checkpoint_path,
             world_model=world_model,
             vae=vae,
             config=self.config,
+            strict=False,
+            map_location=device,  # Load directly to target device
         )
         world_model = wm_module.world_model
+
         logger.info("Loaded trained World Model from Lightning checkpoint")
 
         return world_model

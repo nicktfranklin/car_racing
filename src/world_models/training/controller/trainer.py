@@ -219,18 +219,12 @@ class ControllerTrainer:
                     state_tokens_batch = state_tokens.unsqueeze(1)  # (1, 1, fsq_dim)
                     action_batch = action.unsqueeze(1)  # (1, 1, action_dim)
 
-                    # Move to CPU for world model (which stays on CPU to avoid MPS bugs)
-                    action_batch_cpu = action_batch.cpu()
-                    state_tokens_batch_cpu = state_tokens_batch.cpu()
-
+                    # World model should be on same device as inputs
                     next_state_tokens, reward_pred, done_pred, _ = (
                         self.world_model.sample_next_state(
-                            state_tokens_batch_cpu, action_batch_cpu, temperature=1.0
+                            state_tokens_batch, action_batch, temperature=1.0
                         )
                     )
-
-                    # Move results back to main device
-                    next_state_tokens = next_state_tokens.to(self.device)
 
                     # Store reward
                     rewards[rollout_idx, step] = reward_pred.squeeze()
@@ -243,7 +237,8 @@ class ControllerTrainer:
                         device=self.device,
                     )
                     # Vectorized conversion: (token * 2 / (level - 1)) - 1
-                    z_q = (next_state_tokens.float() * 2.0 / (levels_tensor - 1)) - 1.0
+                    # Squeeze seq_len dimension: (batch, 1, fsq_dim) -> (batch, fsq_dim)
+                    z_q = (next_state_tokens.squeeze(1).float() * 2.0 / (levels_tensor - 1)) - 1.0
 
                     # Update state tokens for next iteration
                     # Squeeze to remove sequence dimension since next_state_tokens has shape (batch, 1, fsq_dim)

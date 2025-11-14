@@ -227,12 +227,16 @@ def setup_trainer(
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
+    # Mixed precision training (fp16) for 50% memory reduction
+    precision = "16-mixed" if config.training.use_mixed_precision else "32-true"
+
     trainer = L.Trainer(
         max_epochs=max_epochs,
         callbacks=callbacks,
         logger=logger,
         accelerator="auto",
         devices=1,
+        precision=precision,
         log_every_n_steps=log_every_n_steps,
         val_check_interval=1.0,
         enable_progress_bar=True,

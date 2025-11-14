@@ -77,6 +77,13 @@ class WorldModel(nn.Module):
         Returns:
             action_tokens: (batch, seq_len, 3) discrete token IDs
         """
+        # Validate input shape
+        if actions.dim() != 3 or actions.shape[-1] != 3:
+            raise ValueError(
+                f"discretize_actions expects (batch, seq_len, 3), got {actions.shape}. "
+                f"Caller should ensure actions have seq_len dimension."
+            )
+
         batch_size, seq_len = actions.shape[:2]
         action_tokens = torch.zeros(
             batch_size, seq_len, 3, dtype=torch.long, device=actions.device
@@ -185,7 +192,8 @@ class WorldModel(nn.Module):
                 :, base_idx + self.fsq_dim : base_idx + self.tokens_per_timestep
             ] = action_tokens[:, t, :]
 
-        return token_ids
+        # Make contiguous for MPS backend compatibility
+        return token_ids.contiguous()
 
     def forward(
         self,
@@ -304,9 +312,10 @@ class WorldModel(nn.Module):
             if action_start < targets.shape[1]:
                 mask[:, action_start : min(action_start + 3, targets.shape[1])] = 0.0
 
-        # Forward pass
-        outputs = self.transformer(input_ids=inputs)
+        # Forward pass (output hidden states to avoid second forward pass)
+        outputs = self.transformer(input_ids=inputs, output_hidden_states=True)
         logits = outputs.logits  # (batch, seq_len-1, VOCAB_SIZE)
+        hidden_states = outputs.hidden_states[-1]  # Last layer hidden states
 
         # Token prediction loss with masking
         loss_per_token = F.cross_entropy(
@@ -321,7 +330,7 @@ class WorldModel(nn.Module):
         token_loss = masked_loss.sum() / (mask.sum() + 1e-8)
 
         # Reward and done prediction (from positions after each complete (state, action) pair)
-        hidden_states = self.transformer.transformer(input_ids=inputs)[0]
+        # Reuse hidden_states from first forward pass (no second pass needed!)
         # Reward positions: after each action sequence (t*7 + 5 for t in range(seq_len))
         reward_positions = [
             t * self.tokens_per_timestep + self.fsq_dim + 2

@@ -246,6 +246,10 @@ class TrainingConfig(BaseModel):
 
     # General training
     device: str = Field(default="mps", description="Training device")
+    use_mixed_precision: bool = Field(
+        default=False,
+        description="Use mixed precision (fp16) training for 50% memory reduction",
+    )
     batch_size: int = Field(default=32, description="Batch size")
     num_epochs: int = Field(default=100, description="Number of training epochs")
 

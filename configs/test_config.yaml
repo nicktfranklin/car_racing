@@ -109,6 +109,7 @@ data:
 
 training:
   device: mps  # Change to 'cuda' or 'cpu' as needed
+  use_mixed_precision: false  # MPS doesn't support mixed precision well
   batch_size: 64  # Reduced from 256 for faster testing
   num_epochs: 10  # Short test epochs
   train_vae_epochs: 5  # Quick VAE test (vs 1000 for production)
@@ -129,7 +130,7 @@ training:
   # World Model dataset parameters (sequential loading with subsampling)
   world_model_subsample_rate: 4  # Use every 4th frame
   world_model_files_per_chunk: 1  # Load only 1 file at a time for testing (vs 5)
-  world_model_sequence_length: 16  # Keep at 16 (already reduced from 64)
+  world_model_sequence_length: 4  # Reduced to 4 for memory optimization
 
   # Lightning training parameters - World Model
   world_model_batch_size: 16  # Reduced from 32 for faster testing

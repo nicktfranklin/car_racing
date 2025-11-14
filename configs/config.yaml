@@ -108,6 +108,7 @@ data:
 
 training:
   device: cuda
+  use_mixed_precision: true  # Enable fp16 for 50% memory reduction
   batch_size: 256  # Increased back to 256 now that leaks are fixed
   num_epochs: 1_000
   train_vae_epochs: 1_000
@@ -127,7 +128,7 @@ training:
 
   # World Model dataset parameters (sequential loading with subsampling)
   world_model_subsample_rate: 4  # Use every 4th frame
-  world_model_files_per_chunk: 5  # Load 5 files at a time (~6GB)
+  world_model_files_per_chunk: 1  # Load 1 file at a time (reduced for memory)
   world_model_sequence_length: 4  # Reduced from 64 due to autoregressive FSQ (16*5=80 tokens)
 
   # Lightning training parameters - World Model
