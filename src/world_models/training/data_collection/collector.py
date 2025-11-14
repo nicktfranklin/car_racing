@@ -32,7 +32,16 @@ class DataCollector:
     def __init__(self, config: DataConfig):
         self.config = config
         # Expand tilde in data_dir to absolute path
+        original_data_dir = self.config.data_dir
         self.config.data_dir = os.path.expanduser(self.config.data_dir)
+
+        print(f"\n[DataCollector] Data directory configuration:")
+        print(f"  Original path: {original_data_dir}")
+        print(f"  Expanded path: {self.config.data_dir}")
+        print(f"  Directory exists: {os.path.exists(self.config.data_dir)}")
+        if os.path.exists(self.config.data_dir):
+            print(f"  Directory is readable: {os.access(self.config.data_dir, os.R_OK)}")
+
         self.env = None
 
     def setup_env(self):
@@ -472,6 +481,26 @@ class DataCollector:
         # Find all chunk files
         pattern = os.path.join(self.config.data_dir, f"{base_filename}_chunk_*.h5")
         chunk_files = sorted(glob.glob(pattern))
+
+        print(f"\n[DataCollector] Searching for chunk files:")
+        print(f"  Base filename: {base_filename}")
+        print(f"  Search pattern: {pattern}")
+        print(f"  Files found: {len(chunk_files)}")
+        if chunk_files:
+            print(f"  First 3 files: {[os.path.basename(f) for f in chunk_files[:3]]}")
+            print(f"  Last file: {os.path.basename(chunk_files[-1])}")
+        else:
+            print(f"  No chunk files found!")
+            # List what's actually in the directory
+            if os.path.exists(self.config.data_dir):
+                all_files = os.listdir(self.config.data_dir)
+                h5_files = [f for f in all_files if f.endswith('.h5')]
+                print(f"  Files in directory ({len(all_files)} total, {len(h5_files)} .h5 files):")
+                if h5_files:
+                    print(f"    First 5 .h5 files: {h5_files[:5]}")
+                else:
+                    print(f"    No .h5 files in directory")
+                    print(f"    First 10 files: {all_files[:10]}")
 
         return [os.path.basename(f) for f in chunk_files]
 
